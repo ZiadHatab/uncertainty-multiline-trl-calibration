@@ -64,7 +64,7 @@ cal = umTRL(lines=lines, line_lengths=line_lengths, reflect=reflect,
                )
 
 cal.run_umTRL()      # run mTRL with uncertainty evaluation
-# cal.run_mTRL()  # this runs mTRL without uncertainties. Very fast, as METAS packagse not used.
+# cal.run_mTRL()  # this runs mTRL without uncertainties. Very fast, as METAS package not used.
 
 dut = rf.Network('measured_dut.s2p')
 cal_dut, cov = cal.apply_cal(dut)  # apply cal to a dut. 
@@ -79,8 +79,8 @@ ereff = cal.ereff
 
 This is ongoing work and it will continuously get updated. For now, there are a few things I planned:
 
-- The code at the moment takes only one reflect the standard. To be honest I intentionally want it to handle only one reflect standard, as the code is starting to get messy. I will update the code to take multiple reflect standards.
-- I want to include a function that takes wave quantities (a and b) and converts them to S-parameters with their covariance matrix. This is actually not difficult to implement. My biggest issue is that every VNA instrument gives the wave quantities as csv file, and they all use different format. Maybe someone knows a standardized way to handle wave quantities?
+- The code at the moment takes only one reflect standard. To be honest, I intentionally want it to handle only one reflect standard, as the code is starting to get messy. I will update the code later to take multiple reflect standards.
+- I want to include a function that takes wave quantities (a and b waves) and convert them to S-parameters with their covariance matrix. This is actually not difficult to implement. My biggest issue is that every VNA instrument gives you the wave quantities as csv file, and they all use different format. Maybe someone knows a standardized way to handle wave quantities?
 - I will try to include connecter, probing and repeatability uncertainties. I’m not sure exactly about the details, but I will figure that out. At the moment the code can handle the following uncertainties: measurement, length, reflect and mismatch uncertainties.
 - I said this in my other [repo](https://github.com/ZiadHatab/multiline-trl-calibration), I will also try here to include a proper documentation for this code (I’m bad at time management, so don’t expect it any time soon). For now, if anyone has a question, just ask me directly here or write me at zi.hatab@gmail.com (or z.hatab@tugraz.at).
 
