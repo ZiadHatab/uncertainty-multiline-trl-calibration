@@ -9,13 +9,13 @@ All uncertainties are defined as covariance matrices as function of frequency. I
 
 ## Code requirements
 
-You need to have the following installed in your python environment:
+You need to have the following packages installed in your python environment:
 
 ```powershell
 python -m pip install -U numpy scipy scikit-rf metas_unclib matplotlib
 ```
 
-Of course, you need load the file `umTRL.py` into your main script (see the examples).
+Of course, you need to load the file `umTRL.py` into your main script (see the examples).
 
 ## How to use
 
