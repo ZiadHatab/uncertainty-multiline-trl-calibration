@@ -63,7 +63,7 @@ cal = umTRL(lines=lines, line_lengths=line_lengths, reflect=reflect,
                ureflect=ureflect, uereff_Gamma=uereff_Gamma,
                )
 
-cal.run_umTRL()      # run TUGmTRL calibration
+cal.run_umTRL()      # run mTRL with uncertainty evaluation
 # cal.run_mTRL()  # this runs mTRL without uncertainties. Very fast, as METAS packagse not used.
 
 dut = rf.Network('measured_dut.s2p')
