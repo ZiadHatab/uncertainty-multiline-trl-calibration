@@ -88,18 +88,28 @@ def add_white_noise(NW, sigma=0.01):
     NW_new.s = NW_new.s + noise
     return NW_new
 
-def TL(l, cpw, Z0=None):
-    # create mismatched transmission line from skrf cpw object
-    # the line function from skrf is not fully correct (I will let them know about it)
-    if Z0 is None:
-        Z0 = cpw.Z0[0]
-    S = []
-    for g,zc in zip(cpw.gamma, cpw.Z0):
-        G = (zc-Z0)/(zc+Z0)
-        R = np.array([[1, G],[G, 1]])/np.sqrt(1-G**2)
-        S.append( T2S(R@np.diag([np.exp(-l*g), np.exp(l*g)])@np.linalg.inv(R)) )
+def Qnm(Zn, Zm):
+    # Impedance transformer in T-paramters from on Eqs. (86) and (87) in
+    # R. Marks and D. Williams, "A general waveguide circuit theory," 
+    # Journal of Research (NIST JRES), National Institute of Standards and Technology,
+    # Gaithersburg, MD, no. 97, 1992.
+    # https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4914227/
+    Gnm = (Zm-Zn)/(Zm+Zn)
+    return np.sqrt(Zn.real/Zm.real*(Zm/Zn).conjugate())/np.sqrt(1-Gnm**2)*np.array([[1, Gnm],[Gnm, 1]])
     
-    return rf.Network(s=np.array(S), frequency=cpw.frequency)
+def TL(l, cpw, Z01=None, Z02=None):
+    # create mismatched transmission line from skrf cpw object
+    # the line function from skrf is not fully correct. it has a 180deg offset 
+    # in the S11 and S22 (I will let them know about it).
+    N = len(cpw.Z0)  # number of frequency points
+    Z01 = cpw.Z0 if Z01 is None else np.atleast_1d(Z01)*np.ones(N)
+    Z02 = Z01 if Z02 is None else np.atleast_1d(Z02)*np.ones(N)
+    S = []
+    for g,zc,z01,z02 in zip(cpw.gamma, cpw.Z0, Z01, Z02):
+        T = Qnm(z01,zc)@np.diag([np.exp(-l*g), np.exp(l*g)])@Qnm(zc,z02)
+        S.append(T2S(T))
+    
+    return rf.Network(s=np.array(S), frequency=cpw.frequency, name='From T2S')
 
 def ideal_sym_DUT(freq):
     # ideal lossless, symmetrical, equal reflection and transmission network
