@@ -3,7 +3,7 @@ A multiline thru-reflect-line (TRL) calibration inclusive linear uncertainty pro
 
 ## About the implementation
 
-This is an extension of my original [mTRL algorithm](https://github.com/ZiadHatab/multiline-trl-calibration) [1]. I integrated METAS UncLib [2] package in my code so I don’t need to derive the Jacobians myself. I included additional math to cope with different uncertainty types and for everything to work cohesively. 
+This is an extension of my original [mTRL algorithm](https://github.com/ZiadHatab/multiline-trl-calibration) [1]. I used METAS UncLib [2] package in my code so I don’t need to derive the Jacobians myself. I included additional math to cope with different uncertainty types and for everything to work cohesively. 
 
 All uncertainties are defined as covariance matrices as function of frequency. If only one covariance matrix is given, the code will repeat it along the frequency. If only a scalar variance is given, then a diagonal covariance matrix is generated and repeated along the frequency. 
 
