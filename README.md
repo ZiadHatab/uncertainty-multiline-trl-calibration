@@ -75,6 +75,72 @@ ereff = cal.ereff
 
 ```
 
+## How to define covariance matrices
+
+If you look in the above example, or even in the other examples, you will notice that I never actually fully define a covariance matrix, not to mention a frequency-dependent one. In most cases, you probably would never actually define a full covariance matrix. However, I’m almost certain that this will cause confusion to some people. So, I will demonstrate here the most general case, and go down to the most simple case.
+
+Before I talk about how you write covariance matrices for mTRL calibration. Let me summarize some basics you should be aware of when dealing with covariance matrices:
+
+- The covariance of a real scalar is just the variance (scalar).
+- The covariance of a complex scalar is a 2x2 matrix. The first entry is for the real part, the second for the imaginary part (If already known in polar coordinates, you need to transform it to cartesian coordinates).
+- The covariance of a *NxM* real matrix is a *(NM)x(NM)* matrix. To be honest, covariance is actually defined for vectors. The way people generalized it to matrices is by computing the covariance of the vectorized version of the matrix using the [vec() operator](https://en.wikipedia.org/wiki/Vectorization_%28mathematics%29), which basically creates a vector from the matrix by stacking its columns. That is way the covariance has a dimension of *(NM)x(NM)*.
+- The covariance of a *NxM* complex matrix is a *(2NM)x(2NM)*. This is because we actually have two matrices, one for the real part and the second for the imaginary part. Remember, the order is real then imaginary, for each element.
+- If the elements in a matrix (or vector) are independent, then the corresponding covariance matrix is a diagonal matrix. The diagonal elements are the variances of the elements.
+
+### frequency-dependent covariance
+
+This is the most general case, where you know the covariance at each frequency point. We do, however, assume independency between the frequency points. For example, if we have *K* frequency points of 2-port S-parameters measurement. The resulting covariance would be a 3D array of the size: *Kx8x8.* Basically, we have at each frequency point a 8x8 covariance matrix.
+
+```python
+covS = np.array([ [[cov1]], [[cov2]], ...,  [[covK]] ])
+```
+
+Another example, which is maybe unrealistic, let’s assume we have *N* line standards with uncertainty in their lengths. Let’s assume, the machine that made the transmission lines has some memory effect, where every time it moves to fabricate another transmission line the uncertainty of the previous line effects the uncertainty of the next line (i.e., correlation). Now, to make it even more unrealistic, let say the uncertainty changes with frequency (maybe this is actually possible when discussing metamaterial 😉). In any case, the size of the total covariance is now *KxNxN* (remember, we have at each frequency point a *NxN* covariance, as we are working with lengths, i.e., real numbers)*.*
+
+### frequency-independent covariance
+
+So, let’s say the covariance repeats along the frequency. One way to define the total covariance is just to repeat a the single covariance *K*-times:
+
+```python
+Cov = np.tile(cov, reps=(K,1,1))
+```
+
+Alternatively, I wrote my mTRL code so that you can just give the code only a single covariance and it will repeat it along the frequency automatically. You just write
+
+```python
+Cov = cov  # where cov is a single covariance of a set of paramters, e.g., S-paramters or lengths ... 
+```
+
+### correlation-free covariance
+
+In some cases, the covariance might describe independent elements, i.e., the covariance is a diagonal matrix. In such cases you could just write the diagonal matrix directly like
+
+```python
+cov = np.diag([var1, var2, ..., varN])
+```
+
+Alternatively, you could just pass the vector directly. I wrote the code such that it diagonalize it automatically if given a vector:
+
+```python
+cov = np.array([var1, var2, ..., varN])
+```
+
+### equal-variance covariance
+
+The most simple case, you find me using it often, is when you assume all parameters having the same variance and are independent. Basically, the covariance matrix is a variance value multiplied by an identity matrix.
+
+```python
+cov = var*np.eye(N)
+```
+
+In my code, you can just pass a scalar as covariance and the code will automatically expand it to a diagonal matrix. 
+
+```python
+cov = var
+```
+
+For example, I often use this to assign uncertainty in the length of the lines.
+
 ## TO-DO
 
 This is ongoing work and it will continuously get updated. For now, there are a few things I planned:
