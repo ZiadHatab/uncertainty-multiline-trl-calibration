@@ -67,7 +67,7 @@ cal.run_umTRL()      # run mTRL with uncertainty evaluation
 # cal.run_mTRL()  # this runs mTRL without uncertainties. Very fast, as METAS package not used.
 
 dut = rf.Network('measured_dut.s2p')
-cal_dut, cov = cal.apply_cal(dut)  # apply cal to a dut. 
+cal_dut, cov = cal.apply_cal(dut)  # apply cal to a dut and return also frequency-dependent covariance
 
 # propagation constant and effective constant
 gamma = cal.gamma
