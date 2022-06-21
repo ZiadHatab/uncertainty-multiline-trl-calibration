@@ -19,7 +19,7 @@ Of course, you need to load the file `umTRL.py` into your main script (see the e
 
 ## How to use
 
-Here is a simple pseudo-code on how it will work. If you use the uncertainty mode, all data will be in METAS uncertainty type (except for calibrated network, those are provided as a skrf type). The functions to shift reference plane and to renormalize the impedance are the same as in my other [repo](https://github.com/ZiadHatab/multiline-trl-calibration).
+Here is a simple pseudo-code on how it works. If you use the uncertainty mode, all data will be in METAS uncertainty type (except for calibrated network, those are provided as a skrf type). The functions to shift reference plane and to renormalize the impedance are the same as in my other [repo](https://github.com/ZiadHatab/multiline-trl-calibration).
 
 ```python
 import skrf as rf
