@@ -141,6 +141,9 @@ cov = var
 
 For example, I often use this to assign uncertainty in the length of the lines.
 
+### what you cannot do
+If your covariance matrix is frequency-dependent, then you have to define it manually, as in the first general case. Even if it is only constructed from variances. If it changes with frequency, you need to explicitly define the covariance matrix at each frequency point. The simplification cases I mentioned before are meant to be used when you have frequency-independent covariance/variance. 
+
 ## TO-DO
 
 This is ongoing work and it will continuously get updated. For now, there are a few things I planned:
