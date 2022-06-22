@@ -171,7 +171,7 @@ if __name__=='__main__':
         ep_r = 12 + np.random.randn()*sigma_er
         cpw = CPW(freq, w=40e-6, s=25e-6, ep_r=ep_r*(1-0.001j), t=5e-6, rho=2e-8)
         Z0_mc.append(cpw.Z0[0])
-        ereff_mc.append(cpw.ep_re)
+        ereff_mc.append(cpw.ep_reff[0])
     Z0_mc = np.array(Z0_mc)
     ereff_mc = np.array(ereff_mc)
     G_mc = (Z0_mc-cpw_ori.Z0[0])/(Z0_mc+cpw_ori.Z0[0])
@@ -189,7 +189,7 @@ if __name__=='__main__':
         # include all uncertainties
         cpws = [CPW(freq, w=40e-6, s=25e-6, ep_r=(12 + np.random.randn()*sigma_er)*(1-0.001j), 
                     t=5e-6, rho=2e-8) for l in line_lengths]
-        lines2 = [A**TL(l+np.random.randn()*np.sqrt(ulengths), cpw_mc, cpw_ori.Z0[0])**B for l,cpw_mc in zip(line_lengths,cpws)]        
+        lines2 = [A**TL(l+np.random.randn()*np.sqrt(ulengths), cpw_mc, cpw_ori.Z0)**B for l,cpw_mc in zip(line_lengths,cpws)]        
         lines_mc        = [add_white_noise(x, sigma) for x in lines2]
 
         SHORT2     = add_white_noise(SHORT, sig_ref)
@@ -244,7 +244,7 @@ if __name__=='__main__':
         plot_with_unc(ax, f, ereff_mc.real.mean(axis=0), 
                       ereff_mc.real.std(axis=0), 
                       label='MC method', marker='v', markevery=20, markersize=10)
-        ax.plot(f*1e-9, cpw_ori.ep_re.real*np.ones(len(f)),  
+        ax.plot(f*1e-9, cpw_ori.ep_reff.real*np.ones(len(f)),  
                 lw=2, label='True value', color='black')
         ax.set_ylabel('Effective permittivity')
         ax.set_ylim([6.2, 6.8])
