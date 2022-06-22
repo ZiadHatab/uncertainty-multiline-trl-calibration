@@ -7,6 +7,8 @@ This is an extension of my original [mTRL algorithm](https://github.com/ZiadHata
 
 All uncertainties are defined as covariance matrices as function of frequency. If only one covariance matrix is given, the code will repeat it along the frequency. If only a scalar variance is given, then a diagonal covariance matrix is generated and repeated along the frequency. 
 
+For those of you interested on how I approached the problem, you read a summary of the work in [3]: [https://arxiv.org/abs/2206.10209](https://arxiv.org/abs/2206.10209)
+
 ## Code requirements
 
 You need to have the following packages installed in your python environment:
@@ -186,9 +188,10 @@ This is basically a breakdown of the previous example, where I show the contribu
     
 - [2] M. Zeier, J. Hoffmann, and M. Wollensack, "Metas.UncLib—a measurement uncertainty calculator for advanced problems," Metrologia, vol. 49, no. 6, pp. 809–815, nov 2012. [https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html](https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html)
     
+- [3] Z. Hatab, M. Gadringer, and W. Bosch, "Propagation of Measurement and Model Uncertainties through Multiline TRL Calibration," online: [https://arxiv.org/abs/2206.10209](https://arxiv.org/abs/2206.10209)
 
 ## About the license
 
-All written code in this repo is under the BSD-3-Clause license. However, to be able to actually use my code you need to install METAS UncLib package, which is under their own license [https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html](https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html).
+Code in this repo is under the BSD-3-Clause license. However, to be able to actually use my code you need to install METAS UncLib package, which is under their own license [https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html](https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html).
 
 Other packages as numpy, skrf, scipy and matplotlib are either under MIT or BSD-3. So nothing to be concerned there.
