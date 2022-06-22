@@ -153,7 +153,7 @@ def vech(X, upper=True):
     vechinx = np.triu_indices(N, 1) if upper else np.tril_indices(N, -1)
     return X[vechinx]
 
-def mTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est, f, sw=[0,0]):
+def mTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est_a, reflect_est_b, f, sw=[0,0]):
     # Performing a standard mTRL without uncertainty. That is, METAS package not used.
     # Slines: array containing 2x2 S-parameters of each line standard
     # lengths: array containing the lengths of the lines
@@ -167,7 +167,9 @@ def mTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est, f, sw=[0
     dot, inv, eig, solve, \
         conj, exp, log, acosh, sqrt, \
             get_value, ucomplex = metas_or_numpy_funcs(metas=False)
-
+    
+    reflect_est_b = reflect_est_a if reflect_est_b is None else reflect_est_b
+    
     # correct switch term
     Slines = [correct_switch_term(x,sw[0],sw[1]) for x in Slines] if np.any(sw) else Slines
     Sreflect = correct_switch_term(Sreflect,sw[0],sw[1]) if np.any(sw) else Sreflect # this is actually not needed!
@@ -219,14 +221,16 @@ def mTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est, f, sw=[0
     ## solve for a11/b11, a11 and b11
     Ga = Sreflect[0,0]
     Gb = Sreflect[1,1]
-    a11_b11 = (Ga - x2_[0])/(1 - Ga*x3_[3])*(1 + Gb*x2_[3])/(Gb + x3_[0])
+    a11_b11 = (reflect_est_b/reflect_est_a)*(Ga - x2_[0])/(1 - Ga*x3_[3])*(1 + Gb*x2_[3])/(Gb + x3_[0])
     a11 = sqrt(a11_b11*a11b11)
     # choose correct answer for a11 and b11
     G0 = get_value( (Ga - x2_[0])/(1 - Ga*x3_[3])/a11 )
-    if abs(G0 - reflect_est) > abs(-G0 - reflect_est):
+    if abs(G0 - get_value(reflect_est_a)) > abs(-G0 - get_value(reflect_est_a)):
         a11 = -a11
     b11 = a11b11/a11
-    reflect_est = get_value( (Ga - x2_[0])/(1 - Ga*x3_[3])/a11 )  # new value
+    
+    reflect_est_a = (Ga - x2_[0])/(1 - Ga*x3_[3])/a11  # new value
+    reflect_est_b = (Gb + x3_[0])/(1 + Gb*x2_[3])/b11  # new value
     
     # build the calibration matrix (de-normalize)
     X  = dot(X_,np.diag([a11b11, b11, a11, ucomplex(1)]) )
@@ -234,7 +238,7 @@ def mTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est, f, sw=[0
     gamma = compute_gamma(X, M, lengths, gamma, metas=False)
     ereff = -(c0/2/np.pi/f*gamma)**2
     
-    return X, k, get_value(ereff), gamma, get_value(reflect_est), lambd
+    return X, k, get_value(ereff), gamma, get_value(reflect_est_a), get_value(reflect_est_b), lambd
 
 def cov_ereff_Gamma(ereff_Gamma, lengths, X, k, f):
     # determine cov of ereff_Gamma (line mismatch)
@@ -253,7 +257,7 @@ def cov_ereff_Gamma(ereff_Gamma, lengths, X, k, f):
     
     return np.array( [munc.get_covariance( k*X@dot(Rkron, [exp(-gamma*l),0,0,exp(gamma*l)]) ) for l in lengths] )
 
-def umTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est, f, X, k, sw=[0,0],
+def umTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est_a, reflect_est_b, f, X, k, sw=[0,0],
                       uSlines=None, ulengths=None, uSreflect=None, ureflect=None, uereff_Gamma=None, usw=None):
     # Slines: array containing 2x2 S-paramters of each line standard
     # lengths: array containing the lengths of the lines
@@ -293,11 +297,11 @@ def umTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est, f, X, k
         Sreflect = munc.ucomplexarray(Sreflect, covariance=np.zeros((8,8)))
     
     if ureflect is not None:
-        reflecta = munc.ucomplex(reflect_est, covariance=ureflect)
-        reflectb = munc.ucomplex(reflect_est, covariance=ureflect)
+        reflect_est_a = munc.ucomplex(reflect_est_a, covariance=ureflect)
+        reflect_est_b = munc.ucomplex(reflect_est_b, covariance=ureflect)
     else:
-        reflecta = munc.ucomplex(reflect_est, covariance=np.zeros((2,2)))
-        reflectb = munc.ucomplex(reflect_est, covariance=np.zeros((2,2)))
+        reflect_est_a = munc.ucomplex(reflect_est_a, covariance=np.zeros((2,2)))
+        reflect_est_b = munc.ucomplex(reflect_est_b, covariance=np.zeros((2,2)))
         
     if uereff_Gamma is not None:
         ereff_Gamma = munc.ucomplexarray([ereff_est, 0], covariance=uereff_Gamma)
@@ -363,14 +367,15 @@ def umTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est, f, X, k
     ## solve for a11/b11, a11 and b11
     Ga = Sreflect[0,0]
     Gb = Sreflect[1,1]
-    a11_b11 = (reflectb/reflecta)*(Ga - x2_[0])/(1 - Ga*x3_[3])*(1 + Gb*x2_[3])/(Gb + x3_[0])
+    a11_b11 = (reflect_est_b/reflect_est_a)*(Ga - x2_[0])/(1 - Ga*x3_[3])*(1 + Gb*x2_[3])/(Gb + x3_[0])
     a11 = sqrt(a11_b11*a11b11)
     # choose correct answer for a11 and b11
     G0 = get_value( (Ga - x2_[0])/(1 - Ga*x3_[3])/a11 )
-    if abs(G0 - reflect_est) > abs(-G0 - reflect_est):
+    if abs(G0 - get_value(reflect_est_a)) > abs(-G0 - get_value(reflect_est_a)):
         a11 = -a11
     b11 = a11b11/a11
-    reflect_est = get_value( (Ga - x2_[0])/(1 - Ga*x3_[3])/a11 )  # new value
+    reflect_est_a = (Ga - x2_[0])/(1 - Ga*x3_[3])/a11  # new value
+    reflect_est_b = (Gb + x3_[0])/(1 + Gb*x2_[3])/b11  # new value
     
     # build the calibration matrix (de-normalize)
     X  = dot(X_,np.diag([a11b11, b11, a11, ucomplex(1)]) )
@@ -378,7 +383,7 @@ def umTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est, f, X, k
     gamma = compute_gamma(X, M, lengths, gamma, metas=True)
     ereff = -(c0/2/np.pi/f*gamma)**2
     
-    return X, k, get_value(ereff), gamma, get_value(reflect_est), lambd
+    return X, k, get_value(ereff), gamma, get_value(reflect_est_a), get_value(reflect_est_b), lambd
 
 def convert2cov(x, f_length, cov_length=2):
     '''
@@ -458,12 +463,14 @@ class umTRL:
     def run_mTRL(self):
         # This runs the standard mTRL without uncertainties (very fast).
         gammas  = []
-        lambds   = []
+        lambds  = []
         Xs      = []
         ks      = []
         ereff0  = self.ereff_est
         gamma0  = 2*np.pi*self.f[0]/c0*np.sqrt(-ereff0)
-        reflect_est0 = -1*np.exp(-2*gamma0*self.reflect_offset)
+        reflect_est0 = self.reflect_est*np.exp(-2*gamma0*self.reflect_offset)
+        reflect_est_a = reflect_est0
+        reflect_est_b = reflect_est0
         
         lengths = self.lengths
 
@@ -472,9 +479,9 @@ class umTRL:
             Sreflect = self.Sreflect[inx,:,:]
             sw = self.switch_term[:,inx]
             
-            X,k,ereff0,gamma,reflect_est0,lambd = mTRL_at_one_freq(Slines, lengths, Sreflect, 
-                                                    ereff_est=ereff0, reflect_est=reflect_est0, 
-                                                    f=f, sw=sw)
+            X,k,ereff0,gamma,reflect_est_a,reflect_est_b,lambd = mTRL_at_one_freq(Slines, lengths, Sreflect, 
+                                                    ereff_est=ereff0, reflect_est_a=reflect_est_a, 
+                                                    f=f, sw=sw, reflect_est_b=reflect_est_b)
             Xs.append(X)
             ks.append(k)
             gammas.append(gamma)
@@ -500,8 +507,9 @@ class umTRL:
         ks      = []
         ereff0  = self.ereff[0]
         gamma0  = 2*np.pi*self.f[0]/c0*np.sqrt(-ereff0)
-        reflect_est0 = -1*np.exp(-2*gamma0*self.reflect_offset)
-        
+        reflect_est0 = self.reflect_est*np.exp(-2*gamma0*self.reflect_offset)
+        reflect_est_a = reflect_est0
+        reflect_est_b = reflect_est0
         # line lengths
         lengths = self.lengths
         
@@ -525,9 +533,10 @@ class umTRL:
             uereff_Gamma = uereff_Gamma_full[inx,:,:]
             usw   = usw_full[inx,:,:]
             
-            X,k,ereff0,gamma,reflect_est0,lambd = \
+            X,k,ereff0,gamma, reflect_est_a, reflect_est_b, lambd = \
                 umTRL_at_one_freq(Slines, lengths, Sreflect, 
-                                  ereff_est=ereff0, reflect_est=reflect_est0, f=f,
+                                  ereff_est=ereff0, reflect_est_a=reflect_est_a, 
+                                  reflect_est_b=reflect_est_b, f=f,
                                   X=self.X[inx], k=self.k[inx], sw=sw,
                                   uSlines=uSlines, ulengths=ulengths, 
                                   uSreflect=uSreflect, ureflect=ureflect,

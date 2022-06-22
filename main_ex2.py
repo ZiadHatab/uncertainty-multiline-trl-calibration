@@ -111,6 +111,10 @@ def TL(l, cpw, Z01=None, Z02=None):
     
     return rf.Network(s=np.array(S), frequency=cpw.frequency, name='From T2S')
 
+def OSH(l, cpw):
+    # create a offset short networn from cpw object
+    return rf.Network(s=np.array([-np.exp(-2*l*g) for g in cpw.gamma]), frequency=cpw.frequency, name='short')
+
 def ideal_sym_DUT(freq):
     # ideal lossless, symmetrical, equal reflection and transmission network
     s = 1/np.sqrt(2)
@@ -130,12 +134,12 @@ if __name__=='__main__':
     f = freq.f
     
     # 1.0 mm coaxial media for calibration error boxes
-    coax1mm = Coaxial(freq, z0=50, Dint=0.44e-3, Dout=1.0e-3, sigma=1e8)
-    A = coax1mm.line(1, 'm', z0=49, name='X', embed=True) # left
-    B = coax1mm.line(1.01, 'm', z0=51, name='Y', embed=True) # right
+    coax1mm = Coaxial(freq, Dint=0.44e-3, Dout=1.0e-3, sigma=1e8)
+    A = coax1mm.line(1, 'm', z0=50, name='A') # left
+    B = coax1mm.line(1.01, 'm', z0=50, name='B') # right
     
     # CPW media used for the calibration standards
-    cpw_ori = CPW(freq, w=40e-6, s=25e-6, ep_r=12*(1-0.001j), t=5e-6, rho=2e-8)
+    cpw_ori = CPW(freq, w=40e-6, s=25e-6, ep_r=14*(1-0.001j), t=5e-6, rho=2e-8)
         
     # line standards
     line_lengths = [0, 0.5e-3, 1.75e-3, 3.5e-3, 3.75e-3, 4.5e-3, 6e-3]
@@ -144,7 +148,7 @@ if __name__=='__main__':
     # reflect standard
     reflect_est = -1
     reflect_offset = 0
-    SHORT = rf.two_port_reflect( cpw_ori.delay_short(reflect_offset, 'm') )
+    SHORT = rf.two_port_reflect( OSH(reflect_offset, cpw_ori) )
     reflect = A**SHORT**B
     
     # embedded DUT
@@ -168,7 +172,7 @@ if __name__=='__main__':
     Z0_mc = []
     ereff_mc = []
     for m in range(M):
-        ep_r = 12 + np.random.randn()*sigma_er
+        ep_r = 14 + np.random.randn()*sigma_er
         cpw = CPW(freq, w=40e-6, s=25e-6, ep_r=ep_r*(1-0.001j), t=5e-6, rho=2e-8)
         Z0_mc.append(cpw.Z0[0])
         ereff_mc.append(cpw.ep_reff[0])
@@ -187,12 +191,14 @@ if __name__=='__main__':
     dut_cal_mc_s21 = []
     for m in range(M):
         # include all uncertainties
-        cpws = [CPW(freq, w=40e-6, s=25e-6, ep_r=(12 + np.random.randn()*sigma_er)*(1-0.001j), 
+        cpws = [CPW(freq, w=40e-6, s=25e-6, ep_r=(14 + np.random.randn()*sigma_er)*(1-0.001j), 
                     t=5e-6, rho=2e-8) for l in line_lengths]
         lines2 = [A**TL(l+np.random.randn()*np.sqrt(ulengths), cpw_mc, cpw_ori.Z0)**B for l,cpw_mc in zip(line_lengths,cpws)]        
         lines_mc        = [add_white_noise(x, sigma) for x in lines2]
 
-        SHORT2     = add_white_noise(SHORT, sig_ref)
+        SHORT2 = rf.two_port_reflect( add_white_noise( OSH(reflect_offset, cpw_ori), np.sqrt(ureflect)), 
+            add_white_noise( OSH(reflect_offset, cpw_ori), np.sqrt(ureflect)) )
+        
         reflect2   = A**SHORT2**B
         reflect_mc = add_white_noise(reflect2, sigma)
         
@@ -247,8 +253,8 @@ if __name__=='__main__':
         ax.plot(f*1e-9, cpw_ori.ep_reff.real*np.ones(len(f)),  
                 lw=2, label='True value', color='black')
         ax.set_ylabel('Effective permittivity')
-        #ax.set_ylim([6.2, 6.8])
-        #ax.set_yticks(np.arange(6.2, 6.9, 0.2))
+        ax.set_ylim([6.2, 6.8])
+        ax.set_yticks(np.arange(6.2, 6.81, 0.2))
         
         ax = axs[1]
         losses_dbmm = ualpha2dbmm(cal_lu.gamma)
