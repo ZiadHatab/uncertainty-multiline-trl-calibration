@@ -247,8 +247,8 @@ if __name__=='__main__':
         ax.plot(f*1e-9, cpw_ori.ep_reff.real*np.ones(len(f)),  
                 lw=2, label='True value', color='black')
         ax.set_ylabel('Effective permittivity')
-        ax.set_ylim([6.2, 6.8])
-        ax.set_yticks(np.arange(6.2, 6.9, 0.2))
+        #ax.set_ylim([6.2, 6.8])
+        #ax.set_yticks(np.arange(6.2, 6.9, 0.2))
         
         ax = axs[1]
         losses_dbmm = ualpha2dbmm(cal_lu.gamma)
