@@ -71,7 +71,7 @@ cal.run_umTRL()      # run mTRL with uncertainty evaluation
 dut = rf.Network('measured_dut.s2p')
 cal_dut, cov = cal.apply_cal(dut)  # apply cal to a dut and return also frequency-dependent covariance
 
-# propagation constant and effective constant
+# propagation constant and effective relative dielectric constant
 gamma = cal.gamma
 ereff = cal.ereff
 
