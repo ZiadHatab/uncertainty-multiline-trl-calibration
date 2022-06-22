@@ -171,7 +171,7 @@ if __name__=='__main__':
         ep_r = 12 + np.random.randn()*sigma_er
         cpw = CPW(freq, w=40e-6, s=25e-6, ep_r=ep_r*(1-0.001j), t=5e-6, rho=2e-8)
         Z0_mc.append(cpw.Z0[0])
-        ereff_mc.append(cpw.ep_re)
+        ereff_mc.append(cpw.ep_reff[0])
     Z0_mc = np.array(Z0_mc)
     ereff_mc = np.array(ereff_mc)
     G_mc = (Z0_mc-cpw_ori.Z0[0])/(Z0_mc+cpw_ori.Z0[0])
