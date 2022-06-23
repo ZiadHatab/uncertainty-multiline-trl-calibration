@@ -7,7 +7,7 @@ This is an extension of my original [mTRL algorithm](https://github.com/ZiadHata
 
 All uncertainties are defined as covariance matrices as function of frequency. If only one covariance matrix is given, the code will repeat it along the frequency. If only a scalar variance is given, then a diagonal covariance matrix is generated and repeated along the frequency. 
 
-For those of you interested on how I approached the problem, you read a summary of the work in [3]: [https://arxiv.org/abs/2206.10209](https://arxiv.org/abs/2206.10209)
+For those of you interested on how I approached the problem, you can read a summary of the work in [3]: [https://arxiv.org/abs/2206.10209](https://arxiv.org/abs/2206.10209)
 
 ## Code requirements
 
