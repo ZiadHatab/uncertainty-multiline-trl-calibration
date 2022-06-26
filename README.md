@@ -97,7 +97,7 @@ This is the most general case, where you know the covariance at each frequency p
 covS = np.array([ [[cov1]], [[cov2]], ...,  [[covK]] ])
 ```
 
-Another example, which is maybe unrealistic, let’s assume we have *N* line standards with uncertainty in their lengths. Let’s assume, the machine that made the transmission lines has some memory effect, where every time it moves to fabricate another transmission line the uncertainty of the previous line effects the uncertainty of the next line (i.e., correlation). Now, to make it even more unrealistic, let say the uncertainty changes with frequency (maybe this is actually possible when discussing metamaterial 😉). In any case, the size of the total covariance is now *KxNxN* (remember, we have at each frequency point a *NxN* covariance, as we are working with lengths, i.e., real numbers)*.*
+Another example, which is maybe unrealistic, let’s assume we have *N* line standards with uncertainty in their lengths. Let’s assume, the machine that made the transmission lines has some memory effect, where every time it moves to fabricate another transmission line the uncertainty of the previous line affects the uncertainty of the next line (i.e., correlation). Now, to make it even more unrealistic, let say the uncertainty changes with frequency (maybe this is actually possible when discussing metamaterial 😉). In any case, the size of the total covariance is now *KxNxN* (remember, we have at each frequency point a *NxN* covariance, as we are working with lengths, i.e., real numbers)*.*
 
 ### frequency-independent covariance
 
