@@ -85,7 +85,7 @@ Before I talk about how you write covariance matrices for mTRL calibration. Let 
 
 - The covariance of a real scalar is just the variance (scalar).
 - The covariance of a complex scalar is a 2x2 matrix. The first entry is for the real part, the second for the imaginary part (If already known in polar coordinates, you need to transform it to cartesian coordinates).
-- The covariance of a *NxM* real matrix is a *(NM)x(NM)* matrix. To be honest, covariance is actually defined for vectors. The way people generalized it to matrices is by computing the covariance of the vectorized version of the matrix using the [vec() operator](https://en.wikipedia.org/wiki/Vectorization_%28mathematics%29), which basically creates a vector from the matrix by stacking its columns. That is way the covariance has a dimension of *(NM)x(NM)*.
+- The covariance of a *NxM* real matrix is a *(NM)x(NM)* matrix. To be honest, covariance is actually defined for vectors. The way people generalized it to matrices is by computing the covariance of the vectorized version of the matrix using the [vec() operator](https://en.wikipedia.org/wiki/Vectorization_%28mathematics%29), which basically creates a vector from the matrix by stacking its columns. That is why the covariance has a dimension of *(NM)x(NM)*.
 - The covariance of a *NxM* complex matrix is a *(2NM)x(2NM)* matrix. This is because we actually have two matrices, one for the real part and the second for the imaginary part. Remember, the order is real then imaginary, for each element.
 - If the elements in a matrix (or vector) are independent, then the corresponding covariance matrix is a diagonal matrix. The diagonal elements are the variances of the elements.
 
