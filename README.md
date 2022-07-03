@@ -19,6 +19,12 @@ python -m pip install -U numpy scipy scikit-rf metas_unclib matplotlib
 
 Of course, you need to load the file `umTRL.py` into your main script (see the examples).
 
+In case you get an error about `pythonnet` while installig `metas_unclib`, try first instelling the [pre-release](https://stackoverflow.com/questions/67418533/how-to-fix-error-during-pythonnet-installation) of `pythonnet`:
+
+```python
+python -m pip install --pre pythonnet
+```
+
 ## How to use
 
 Here is a simple pseudo-code on how it works. If you use the uncertainty mode, all data will be in METAS uncertainty type (except for calibrated network, those are provided as a skrf type). The functions to shift reference plane and to renormalize the impedance are the same as in my other [repo](https://github.com/ZiadHatab/multiline-trl-calibration).
