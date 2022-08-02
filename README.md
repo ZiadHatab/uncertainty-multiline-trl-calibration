@@ -200,4 +200,4 @@ This is basically a breakdown of the previous example, where I show the contribu
 
 Code in this repo is under the BSD-3-Clause license. However, to be able to actually use my code you need to install METAS UncLib package, which is under their own license [https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html](https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html).
 
-Other packages as numpy, skrf, scipy and matplotlib are either under MIT or BSD-3. So nothing to be concerned there.
+Other packages as numpy, skrf, scipy and matplotlib are BSD-3.
