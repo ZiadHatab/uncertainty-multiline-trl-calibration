@@ -189,7 +189,7 @@ This is basically a breakdown of the previous example, where I show the contribu
 
 ## References
 
-- [1] Z. Hatab, M. Gadringer, and W. Bosch, "Improving the reliability of the multiline trl calibration algorithm," in 98th ARFTG Microwave Measurement Conference, Las Vegas, NV, USA, 2022.
+- [1] Z. Hatab, M. Gadringer and W. Bösch, "Improving The Reliability of The Multiline TRL Calibration Algorithm," 2022 98th ARFTG Microwave Measurement Conference (ARFTG), 2022, pp. 1-5, doi: [10.1109/ARFTG52954.2022.9844064](https://ieeexplore.ieee.org/document/9844064). 
     
     
 - [2] M. Zeier, J. Hoffmann, and M. Wollensack, "Metas.UncLib—a measurement uncertainty calculator for advanced problems," Metrologia, vol. 49, no. 6, pp. 809–815, nov 2012. [https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html](https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html)
