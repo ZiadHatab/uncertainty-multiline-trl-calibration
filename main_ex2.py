@@ -130,7 +130,7 @@ if __name__=='__main__':
     ualpha2dbmm = lambda x: mag2db(munc.umath.exp(munc.umath.real(x)*1e-3))
     
     # define frequency range
-    freq = rf.F(0.5, 150, 300, unit='GHz')
+    freq = rf.F(1, 150, 299, unit='GHz')
     f = freq.f
     
     # 1.0 mm coaxial media for calibration error boxes
