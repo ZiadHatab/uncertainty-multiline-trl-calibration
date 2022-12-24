@@ -4,7 +4,7 @@
 This is an implementation of the multiline TRL calibration algorithm with linear 
 uncertainty propagation capabilities. This is an extension of my original 
 mTRL algorithm [1] to account for uncertainties with the help of 
-METAS UncLib [2]. Additional math is included to handle various uncertainty types.
+METAS UncLib [2]. Summery details can be found here: https://arxiv.org/abs/2206.10209
 
 Developed at:
     Institute of Microwave and Photonic Engineering,
@@ -21,7 +21,6 @@ Metrologia, vol. 49, no. 6, pp. 809–815, nov 2012.
 
 import numpy as np
 import skrf as rf
-import scipy.optimize as so   # optimization package (for initial gamma)
 import metas_unclib as munc
 munc.use_linprop()
 
@@ -82,37 +81,29 @@ def T2S(T):
     S[0,1] = T[0,0]*T[1,1]-T[0,1]*T[1,0]
     S[1,0] = 1
     S[1,1] = -T[1,0]
-    
     return S/T[1,1]
 
-def findereff(x, *argv):
-    # objective function to estimate ereff (details in [2])
-    meas = argv[0]
-    line_lengths = argv[1]
-    w = 2*np.pi*argv[2]
-    ereff = x[0] + 1j*x[1]
-    gamma = w/c0*np.sqrt(-ereff)
-    ex = np.exp(gamma*line_lengths)
-    E = np.outer(ex, 1/ex)
-    model = E + E.T
-    error = meas - model
-    return (error*error.conj()).real.sum() # np.linalg.norm(error, ord='fro')**2
-    #return np.linalg.norm(error, ord='nuc')
-
-def estimate_gamma(M, MinvT, lengths, ereff_est, f):
-    # obtain an estimate of gamma. This is only used for weighting and solving 
-    # for the calibration coefficients. The final gamma is computed from 
-    # the calibrated line standards with least-squares.
-    
-    E = MinvT@M[[0,2,1,3]]
-    #options={'rhobeg': 1.0, 'maxiter': 1000, 'disp': False, 'catol': 1e-8}
-    xx = so.minimize(findereff, [ereff_est.real, ereff_est.imag],
-                     method='COBYLA', #options=options, tol=1e-8,
-                   args=(E, lengths, f))
-    ereff = xx.x[0] + 1j*xx.x[1]
-    gamma = 2*np.pi*f/c0*np.sqrt(-ereff)
-    gamma = abs(gamma.real) + 1j*abs(gamma.imag)
-    return gamma
+def compute_G_with_takagi(A, metas=False):
+    # implementation of Takagi decomposition to compute the matrix G used to determine the weighting matrix.
+    #
+    # Singular value decomposition for the Takagi factorization of symmetric matrices
+    # https://www.sciencedirect.com/science/article/pii/S0096300314002239
+    dot, inv, eig, solve, \
+        conj, exp, log, acosh, sqrt, \
+            get_value, ucomplex = metas_or_numpy_funcs(metas=metas)
+    if metas:
+        u,s = eig(A.dot(conj(A).T))
+    else:
+        s,u = eig(A.dot(conj(A).T))
+    s = sqrt(s).real  # singular values. They need to come as real positive floats
+    s = s*np.sign(get_value(s))
+    inx = np.flip(np.argsort(get_value(s))) # sort in increasing order
+    lambd = s[inx][0]*s[inx][1]             # this is the eigenvalue of the calibration eigenvalue problem
+    u = u[:,inx][:,:2]  # low-rank truncated (Eckart-Young-Mirsky theorem)
+    A = (A + A.T)/2  # only consider the symmetric part
+    phi = sqrt( conj(np.diag(u.T.dot(conj(A)).dot(u))) )
+    G = u.dot(np.diag(phi))
+    return G, lambd
 
 def WLS(x,y,w=1, metas=False):
     # Weighted least-squares for a single parameter estimation
@@ -130,28 +121,22 @@ def Vgl(N):
     return np.eye(N-1, dtype=complex) - (1/N)*np.ones(shape=(N-1, N-1), dtype=complex)
 
 def compute_gamma(X, M, lengths, gamma_est, metas=False):
-    # determine gamma after the calibration coefficients are solved
+    # determine gamma after normalized calibration coefficients are solved
+    # gamma is determined through linear weighted least-squares
     dot, inv, eig, solve, \
         conj, exp, log, acosh, sqrt, \
             get_value, ucomplex = metas_or_numpy_funcs(metas=metas)
     
-    #EX = solve(X, M)
-    EX = dot(inv(X), M)
-    gamma_l = log(EX[0,:]/EX[-1,:])
+    EX = dot(inv(X), M)[[0,-1],:]     # extract z and y columns
+    EX = np.diag(1/EX[:,0]).dot(EX)   # normalize to the thru line
+    gamma_l = log((EX[0,:] + 1/EX[-1,:])/2)
     gamma_l = gamma_l[get_value(lengths) != 0]
-    l = -2*lengths[get_value(lengths) != 0]
-
+    l = -lengths[get_value(lengths) != 0]
     n = np.round(get_value(gamma_l - gamma_est*l).imag/np.pi/2)
     gamma_l = gamma_l - 1j*2*np.pi*n # unwrapped
     
     return WLS(l, gamma_l, Vgl(len(l)+1))
 
-def vech(X, upper=True):
-    # return vector of the elements in the upper- or lower-triangle of a matrix
-    # diagonal elements are excluded!
-    N = X.shape[0]
-    vechinx = np.triu_indices(N, 1) if upper else np.tril_indices(N, -1)
-    return X[vechinx]
 
 def mTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est_a, reflect_est_b, f, sw=[0,0]):
     # Performing a standard mTRL without uncertainty. That is, METAS package not used.
@@ -181,44 +166,44 @@ def mTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est_a, reflec
     Mi    = [S2T(x) for x in Slines] # convert to T-parameters        
     M     = np.array([x.flatten('F') for x in Mi]).T
     MinvT = np.array([inv(x).flatten('F') for x in Mi])
-            
-    gamma = estimate_gamma(M, MinvT, lengths, ereff_est, f)
-
-    # calibration weighting matrix
-    exps = exp(gamma*lengths)
-    W = conj(np.outer(exps,1/exps) - np.outer(1/exps,exps))
+          
+    ## Compute W from Takagi factorization
+    G, lambd = compute_G_with_takagi(MinvT.dot(M[[0,2,1,3]]), metas=False)
+    W = conj((G@np.array([[0,1j],[-1j,0]])).dot(G.T))
     
-    F = dot(dot(M,W),MinvT[:,[0,2,1,3]]) # weighted measurements
+    # estimated gamma to be used to resolve the sign of W
+    gamma_est = 2*np.pi*f/c0*np.sqrt(-(ereff_est-1j*np.finfo(float).eps))  # the eps is to ensure positive square-root
+    y_est = np.exp(gamma_est*get_value(lengths))
+    z_est = 1/y_est
+    if np.sign((y_est.dot(get_value(W)).dot(z_est)).real)-1:
+        W = -W # resolve the sign ambiguity
     
+    ## Solving the weighted eigenvalue problem
+    F = M.dot(W).dot(MinvT[:,[0,2,1,3]]) # weighted measurements
     eigval, eigvec = eig(F) # numpy order
+    inx = np.argsort(get_value(eigval.real)) # get indices of sorted eigenvalues
+    lambd = (eigval[inx[-1]] - eigval[inx[0]])/2   # lambda for debugging; over ride lambd from G (both should be the same)
     
-    # length difference
-    dl = np.tile( lengths, (len(lengths), 1) )
-    dl = abs(vech(dl) - vech(dl.T))
-    
-    # sorting the eigenvalues and eigenvectors
-    lambd_model = (abs(exp(gamma*dl)-exp(-gamma*dl))**2).sum()
-    inx1  = np.argmin(abs(eigval-(-lambd_model)))
-    inx2  = np.argmin(abs(eigval-(lambd_model)))
-    inx   = [inx1, inx2]
-    lambd = (eigval[inx[-1]] - eigval[inx[0]])/2   # lambda for debugging
-
     x1_ = eigvec[:,inx[0]]
-    x1_ = x1_/x1_[0]
     x4  = eigvec[:,inx[-1]]
+    x1_ = x1_/x1_[0]
     x4  = x4/x4[-1]
     x2_ = np.array([x4[2], ucomplex(1), x4[2]*x1_[2], x1_[2]])
     x3_ = np.array([x4[1], x4[1]*x1_[1], ucomplex(1), x1_[1]])
     
-    # Normalized calibration matrix
-    X_ = np.array([x1_, x2_, x3_, x4]).T
+    X_ = np.array([x1_, x2_, x3_, x4]).T  # normalized calibration matrix
     
+    ## Compute progataion constant
+    gamma = compute_gamma(X_, M, lengths, gamma_est, metas=False)
+    gamma = gamma.real*np.sign(get_value(gamma.real)) + 1j*gamma.imag # make sure to get the correct sign for losses
+    ereff = -(c0/2/np.pi/f*gamma)**2
+
+    ## De-normalization
     # solve for a11b11 and k from Thru measurement
     ka11b11,_,_,k = solve(X_, M[:,0])
-    #ka11b11,_,_,k = dot(inv(X_),M[:,0])
+    #ka11b11,_,_,k = inv(X_).dot(M[:,0])
     a11b11  = ka11b11/k
-    
-    ## solve for a11/b11, a11 and b11
+    # solve for a11/b11, a11 and b11
     Ga = Sreflect[0,0]
     Gb = Sreflect[1,1]
     a11_b11 = (reflect_est_b/reflect_est_a)*(Ga - x2_[0])/(1 - Ga*x3_[3])*(1 + Gb*x2_[3])/(Gb + x3_[0])
@@ -234,9 +219,6 @@ def mTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est_a, reflec
     
     # build the calibration matrix (de-normalize)
     X  = dot(X_,np.diag([a11b11, b11, a11, ucomplex(1)]) )
-
-    gamma = compute_gamma(X, M, lengths, gamma, metas=False)
-    ereff = -(c0/2/np.pi/f*gamma)**2
     
     return X, k, get_value(ereff), gamma, get_value(reflect_est_a), get_value(reflect_est_b), lambd
 
@@ -259,9 +241,9 @@ def cov_ereff_Gamma(ereff_Gamma, lengths, X, k, f):
 
 def umTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est_a, reflect_est_b, f, X, k, sw=[0,0],
                       uSlines=None, ulengths=None, uSreflect=None, ureflect=None, uereff_Gamma=None, usw=None):
-    # Slines: array containing 2x2 S-paramters of each line standard
+    # Slines: array containing 2x2 S-parameters of each line standard
     # lengths: array containing the lengths of the lines
-    # Sreflect: 2x2 S-paramters of the measured reflect standard
+    # Sreflect: 2x2 S-parameters of the measured reflect standard
     # ereff_est: complex scalar of estimated effective permittivity
     # reflect_est: complex scalar of estimated reflection coefficient of the reflect standard
     # f: scalar, current frequency point
@@ -329,42 +311,46 @@ def umTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est_a, refle
     Mi    = [ munc.ucomplexarray(munc.get_value(x), covariance=munc.get_covariance(x) + cov)
              for x,cov in zip(Mi, cov_ereff_Gamma(ereff_Gamma, munc.get_value(lengths), X, k, f))]
     
-    M     = np.array([x.flatten('F') for x in Mi]).T
-    MinvT = np.array([inv(x).flatten('F') for x in Mi])
+    M     = np.array([x.flatten('F') for x in Mi]).T     # line measurements
+    MinvT = np.array([inv(x).flatten('F') for x in Mi])  # inverse line measurements
     
-    gamma = estimate_gamma(get_value(M), get_value(MinvT), get_value(lengths), ereff_est, f)
+    ## compute W from Takagi factorization
+    G, lambd = compute_G_with_takagi(MinvT.dot(M[[0,2,1,3]]), metas=True)
+    W = conj((G@np.array([[0,1j],[-1j,0]])).dot(G.T))
     
-    # calibration weighting matrix
-    exps = exp(gamma*lengths)
-    W = conj(np.outer(exps,1/exps) - np.outer(1/exps,exps))
+    # estimated gamma to be used to resolve the sign of W
+    gamma_est = 2*np.pi*f/c0*np.sqrt(-(ereff_est-1j*np.finfo(float).eps))  # the eps is to ensure positive square-root
+    y_est = np.exp(gamma_est*get_value(lengths))
+    z_est = 1/y_est
+    if np.sign((y_est.dot(get_value(W)).dot(z_est)).real)-1:
+        W = -W # resolve the sign ambiguity
     
-    F = dot(dot(M,W),MinvT[:,[0,2,1,3]]) # weighted measurements
-    
+    ## Solving the weighted eigenvalue problem
+    F = M.dot(W).dot(MinvT[:,[0,2,1,3]]) # weighted measurements
     eigvec, eigval = eig(F) # metas order
-    
-    dl = np.tile( lengths, (len(lengths), 1) )
-    dl = abs(vech(dl) - vech(dl.T))
-    lambd_model = (abs(exp(gamma*dl)-exp(-gamma*dl))**2).sum()
-    inx1  = np.argmin( abs( get_value(eigval-(-lambd_model)) ) )
-    inx2  = np.argmin( abs( get_value(eigval-(lambd_model)) ) )
-    inx   = [inx1, inx2]
-    lambd = (eigval[inx[-1]] - eigval[inx[0]])/2   # lambda. For debugging
+    inx = np.argsort(get_value(eigval.real)) # get indices of sorted eigenvalues
+    lambd = (eigval[inx[-1]] - eigval[inx[0]])/2   # lambda for debugging; over ride lambd from G (both should be the same)
     
     x1_ = eigvec[:,inx[0]]
-    x1_ = x1_/x1_[0]
     x4  = eigvec[:,inx[-1]]
+    x1_ = x1_/x1_[0]
     x4  = x4/x4[-1]
     x2_ = np.array([x4[2], ucomplex(1), x4[2]*x1_[2], x1_[2]])
     x3_ = np.array([x4[1], x4[1]*x1_[1], ucomplex(1), x1_[1]])
-    # Normalized calibration matrix 
-    X_ = np.array([x1_, x2_, x3_, x4]).T
     
+    X_ = np.array([x1_, x2_, x3_, x4]).T  # normalized calibration matrix
+    
+    ## Compute progataion constant
+    gamma = compute_gamma(X_, M, lengths, gamma_est, metas=True)
+    gamma = gamma.real*np.sign(get_value(gamma.real)) + 1j*gamma.imag # make sure to get the correct sign for losses
+    ereff = -(c0/2/np.pi/f*gamma)**2
+    
+    ## De-normalization
     # solve for a11b11 and k from Thru measurement
     ka11b11,_,_,k = solve(X_, M[:,0])
-    #ka11b11,_,_,k = dot(inv(X_),M[:,0])
+    #ka11b11,_,_,k = inv(X_).dot(M[:,0])
     a11b11  = ka11b11/k
-    
-    ## solve for a11/b11, a11 and b11
+    # solve for a11/b11, a11 and b11
     Ga = Sreflect[0,0]
     Gb = Sreflect[1,1]
     a11_b11 = (reflect_est_b/reflect_est_a)*(Ga - x2_[0])/(1 - Ga*x3_[3])*(1 + Gb*x2_[3])/(Gb + x3_[0])
@@ -379,10 +365,7 @@ def umTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est_a, refle
     
     # build the calibration matrix (de-normalize)
     X  = dot(X_,np.diag([a11b11, b11, a11, ucomplex(1)]) )
-    
-    gamma = compute_gamma(X, M, lengths, gamma, metas=True)
-    ereff = -(c0/2/np.pi/f*gamma)**2
-    
+        
     return X, k, get_value(ereff), gamma, get_value(reflect_est_a), get_value(reflect_est_b), lambd
 
 def convert2cov(x, f_length, cov_length=2):
@@ -416,11 +399,9 @@ def convert2cov(x, f_length, cov_length=2):
 
 class umTRL:
     """
+    
     Multiline TRL calibration with uncertainty capabilities, hence "u"mTRL.
     
-    This is an extension of my original mTRL algorithm [1] to account 
-    for uncertainties with the help of METAS UncLib [2].
-
     """
     
     def __init__(self, lines, line_lengths, reflect, 
@@ -468,6 +449,7 @@ class umTRL:
         ks      = []
         ereff0  = self.ereff_est
         gamma0  = 2*np.pi*self.f[0]/c0*np.sqrt(-ereff0)
+        gamma0  = gamma0*np.sign(gamma0.real) # use positive square root
         reflect_est0 = self.reflect_est*np.exp(-2*gamma0*self.reflect_offset)
         reflect_est_a = reflect_est0
         reflect_est_b = reflect_est0
@@ -678,3 +660,5 @@ class umTRL:
 
         self.X = np.array(X_new)
         self.K = np.array(K_new)
+
+# EOF
