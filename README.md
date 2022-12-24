@@ -3,23 +3,24 @@ A multiline thru-reflect-line (TRL) calibration inclusive linear uncertainty pro
 
 ## About the implementation
 
-This is an extension of my original [mTRL algorithm](https://github.com/ZiadHatab/multiline-trl-calibration) [1]. I used METAS UncLib [2] package in my code so I don’t need to derive the Jacobians myself. I included additional math to cope with different uncertainty types and for everything to work cohesively. 
+This is an extension of my original [mTRL algorithm](https://github.com/ZiadHatab/multiline-trl-calibration) [1] with linear uncertainty capabilities. For computation of derivatives (Jacobian), I used Automatic differentiation (AD) method, in which I used the package METAS UncLib [2] for that. All uncertainties are defined as covariance matrices as function of frequency. If only one covariance matrix is given, the code will repeat it along the frequency. If only a scalar variance is given, then a diagonal covariance matrix is generated and repeated along the frequency. For those of you interested on how I approached the problem, you can read a summary of the work in [3]: [https://arxiv.org/abs/2206.10209](https://arxiv.org/abs/2206.10209)
 
-All uncertainties are defined as covariance matrices as function of frequency. If only one covariance matrix is given, the code will repeat it along the frequency. If only a scalar variance is given, then a diagonal covariance matrix is generated and repeated along the frequency. 
+In comparison to my work in [1], I simplified the mTRL implementation a bit to easily propagate uncertainties. In [1] I used optimization procedure to compute the propagation constant, which afterwards I used to compute the weighting matrix *W*. In the current implementation, the propagation constant is not directly part of the calibration solution, because the weighting matrix is now computed directly using Takagi decomposition from the line measurements. Of course, an estimate of the propagation constant is still needed to resolve sign ambiguity. Additionally, a proper estimate of the propagation constant is determined after solving the eigenvalue problem, which can be used later, e.g., to shift reference plane. A summery flow diagram is depicted blow. In each step, the input uncertainties (covariance) are propagated through each step.
 
-For those of you interested on how I approached the problem, you can read a summary of the work in [3]: [https://arxiv.org/abs/2206.10209](https://arxiv.org/abs/2206.10209)
+![ex1_ereff_loss](images/mTRL_flow_diagram.png)
+
 
 ## Code requirements
 
 You need to have the following packages installed in your python environment:
 
 ```powershell
-python -m pip install -U numpy scipy scikit-rf metas_unclib matplotlib
+python -m pip install -U numpy scikit-rf metas_unclib matplotlib
 ```
 
 Of course, you need to load the file `umTRL.py` into your main script (see the examples).
 
-In case you get an error about `pythonnet` while installig `metas_unclib`, try first instelling the [pre-release](https://stackoverflow.com/questions/67418533/how-to-fix-error-during-pythonnet-installation) of `pythonnet`:
+In case you get an error about `pythonnet` while installing `metas_unclib`, try first installing the [pre-release](https://stackoverflow.com/questions/67418533/how-to-fix-error-during-pythonnet-installation) of `pythonnet`:
 
 ```python
 python -m pip install --pre pythonnet
@@ -103,7 +104,7 @@ This is the most general case, where you know the covariance at each frequency p
 covS = np.array([ [[cov1]], [[cov2]], ...,  [[covK]] ])
 ```
 
-Another example, which is maybe unrealistic, let’s assume we have *N* line standards with uncertainty in their lengths. Let’s assume, the machine that made the transmission lines has some memory effect, where every time it moves to fabricate another transmission line the uncertainty of the previous line affects the uncertainty of the next line (i.e., correlation). Now, to make it even more unrealistic, let say the uncertainty changes with frequency (maybe this is actually possible when discussing metamaterial 😉). In any case, the size of the total covariance is now *KxNxN* (remember, we have at each frequency point a *NxN* covariance, as we are working with lengths, i.e., real numbers)*.*
+Another example, which is maybe unrealistic, let’s assume we have *N* line standards with uncertainty in their lengths. Let’s assume, the machine that made the transmission lines has some memory effect, where every time it moves to fabricate another transmission line the uncertainty of the previous line affects the uncertainty of the next line (i.e., correlation). Now, to make it even more unrealistic, let say the uncertainty changes with frequency. In any case, the size of the total covariance is now *KxNxN* (remember, we have at each frequency point a *NxN* covariance, as we are working with lengths, i.e., real numbers)*.*
 
 ### frequency-independent covariance
 
@@ -157,8 +158,7 @@ If your covariance matrix is frequency-dependent, then you have to define it man
 This is ongoing work and it will continuously get updated. For now, there are a few things I planned:
 
 - The code at the moment takes only one reflect standard. To be honest, I intentionally want it to handle only one reflect standard, as the code is starting to get messy. I will update the code later to take multiple reflect standards.
-- I want to include a function that takes wave quantities (a and b waves) and convert them to S-parameters with their covariance matrix. This is actually not difficult to implement. My biggest issue is that every VNA instrument gives you the wave quantities as csv file, and they all use different format. Maybe someone knows a standardized way to handle wave quantities?
-- I will try to include connecter, probing and repeatability uncertainties. I’m not sure exactly about the details, but I will figure that out. At the moment the code can handle the following uncertainties: measurement, length, reflect and mismatch uncertainties.
+- I will try to include probing and repeatability uncertainties. I’m not sure exactly about the details, but I will figure that out. At the moment the code can handle the following uncertainties: measurement, length, reflect and mismatch uncertainties.
 - I said this in my other [repo](https://github.com/ZiadHatab/multiline-trl-calibration), I will also try here to include a proper documentation for this code (I’m bad at time management, so don’t expect it any time soon). For now, if anyone has a question, just ask me directly here or write me at zi.hatab@gmail.com (or z.hatab@tugraz.at).
 
 ## Examples
@@ -199,5 +199,3 @@ This is basically a breakdown of the previous example, where I show the contribu
 ## About the license
 
 Code in this repo is under the BSD-3-Clause license. However, to be able to actually use my code you need to install METAS UncLib package, which is under their own license [https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html](https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html).
-
-Other packages as numpy, skrf, scipy and matplotlib are BSD-3.
