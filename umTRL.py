@@ -193,7 +193,7 @@ def mTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est_a, reflec
     
     X_ = np.array([x1_, x2_, x3_, x4]).T  # normalized calibration matrix
     
-    ## Compute progataion constant
+    ## Compute propagation constant
     gamma = compute_gamma(X_, M, lengths, gamma_est, metas=False)
     gamma = gamma.real*np.sign(get_value(gamma.real)) + 1j*gamma.imag # make sure to get the correct sign for losses
     ereff = -(c0/2/np.pi/f*gamma)**2
@@ -256,7 +256,7 @@ def umTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est_a, refle
     # uSreflect: 8x8 covariance matrix of measured reflect 
     # ureflect: 2x2 covariance matrix of the reflection coefficient of the reflect standard
     # uereff_Gamma: 4x4 covariance matrix of the line mismatch.
-    # usw: 4x4 covariance matrix of swicth terms
+    # usw: 4x4 covariance matrix of switch terms
     
     # metas functions
     dot, inv, eig, solve, \
