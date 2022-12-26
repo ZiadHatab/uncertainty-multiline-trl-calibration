@@ -538,33 +538,87 @@ class umTRL:
         self.error_coef()
     
     def error_coef(self):
-        # return the 3 error terms of each port
-        #
-        # R. B. Marks, "Formulations of the Basic Vector Network Analyzer Error Model including Switch-Terms," 
-        # 50th ARFTG Conference Digest, 1997, pp. 115-126.
-        #
-        # left port:
-        # ERF: forward reflection tracking
-        # EDF: forward directivity
-        # ESF: forward source match
-        # 
-        # right port:
-        # ERR: reverse reflection tracking
-        # EDR: reverse directivity
-        # ESR: reverse source match
+        '''
+        Return the conventional 12 error terms from the error-box model. The conversion equations are adapted from [4]. Also [5] is a good reference for the equations.
+        Originally, I only included the 3 error terms from each port. However, thanks to @Zwelckovich feedback, I decided to update this function to return all 12 error terms. 
+        I also included the switch terms for sake of completeness, as well as the consistency test between 8-terms and 12-terms models, as discussed in [4].  
+
+        [4] R. B. Marks, "Formulations of the Basic Vector Network Analyzer Error Model including Switch-Terms," 50th ARFTG Conference Digest, 1997, pp. 115-126.
+        [5] Dunsmore, J.P.. Handbook of Microwave Component Measurements: with Advanced VNA Techniques.. Wiley, 2020.
+
+        Below are the error term abbreviations in full. In Marks's paper [4] he just used the abbreviations as is, which can be 
+        difficult to understand if you are not familiar with VNA calibration terminology. For those interested in VNAs in general, 
+        I recommend the book by Dunsmore [5], where he lists the terms in full.
         
-        X = self.X
+        Left port error terms (forward direction):
+        EDF: forward directivity
+        ESF: forward source match
+        ERF: forward reflection tracking
+        ELF: forward load match
+        ETF: forward transmission tracking
+        EXF: forward crosstalk
+        
+        Right port error terms (reverse direction):
+        EDR: reverse directivity
+        ESR: reverse source match
+        ERR: reverse reflection tracking
+        ELR: reverse load match
+        ETR: reverse transmission tracking
+        EXR: reverse crosstalk
+        
+        Switch terms:
+        GF: forward switch term
+        GR: reverse switch term
+
+        NOTE: the K in my notation is equivalent to Marks' notation [4] by this relationship: K = (beta/alpha)*(1/ERR).
+        '''
+
         self.coefs = {}
+        # forward 3 error terms. These equations are directly mapped from eq. (3) in [4]
+        EDF =  self.X[:,2,3]
+        ESF = -self.X[:,3,2]
+        ERF =  self.X[:,2,2] - self.X[:,2,3]*self.X[:,3,2]
         
-        # forward errors
-        self.coefs['ERF'] =  X[:,2,2] - X[:,2,3]*X[:,3,2]
-        self.coefs['EDF'] =  X[:,2,3]
-        self.coefs['ESF'] = -X[:,3,2]
+        # reverse 3 error terms. These equations are directly mapped from eq. (3) in [4]
+        EDR = -self.X[:,1,3]
+        ESR =  self.X[:,3,1]
+        ERR =  self.X[:,1,1] - self.X[:,3,1]*self.X[:,1,3]
         
-        # reverse errors
-        self.coefs['ERR'] =  X[:,1,1] - X[:,3,1]*X[:,1,3]
-        self.coefs['EDR'] = -X[:,1,3]
-        self.coefs['ESR'] =  X[:,3,1]
+        # switch terms
+        GF = self.switch_term[0]
+        GR = self.switch_term[1]
+
+        # remaining forward terms
+        ELF = ESR + ERR*GF/(1-EDR*GF)  # eq. (36) in [4].
+        ETF = 1/self.k/(1-EDR*GF)      # eq. (38) in [4], after substituting eq. (36) in eq. (38) and simplifying.
+        EXF = 0*ESR  # setting it to zero, since we assumed no cross-talk in the calibration. (update if known!)
+
+        # remaining reverse terms
+        ELR = ESF + ERF*GR/(1-EDF*GR)    # eq. (37) in [4].
+        ETR = self.k*ERR*ERF/(1-EDF*GR)  # eq. (39) in [4], after substituting eq. (37) in eq. (39) and simplifying.
+        EXR = 0*ESR  # setting it to zero, since we assumed no cross-talk in the calibration. (update if known!)
+
+        # forward direction
+        self.coefs['EDF'] = EDF
+        self.coefs['ESF'] = ESF
+        self.coefs['ERF'] = ERF
+        self.coefs['ELF'] = ELF
+        self.coefs['ETF'] = ETF
+        self.coefs['EXF'] = EXF
+        self.coefs['GF']  = GF
+
+        # reverse direction
+        self.coefs['EDR'] = EDR
+        self.coefs['ESR'] = ESR
+        self.coefs['ERR'] = ERR
+        self.coefs['ELR'] = ELR
+        self.coefs['ETR'] = ETR
+        self.coefs['EXR'] = EXR
+        self.coefs['GR']  = GR
+
+        # consistency check between 8-terms and 12-terms model. Based on eq. (35) in [4].
+        # This should equal zero, otherwise there is inconsistency between the models (can arise from switch term measurements).
+        self.coefs['check'] = abs( ETF*ETR - (ERR + EDR*(ELF-ESR))*(ERF + EDF*(ELR-ESF)) )
         
         return self.coefs
     
