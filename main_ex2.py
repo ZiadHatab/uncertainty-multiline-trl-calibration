@@ -1,28 +1,120 @@
 """
 @author: Ziad Hatab (zi.hatab@gmail.com)
 
-Uncertainty mTRL example using simulated standards.
-Linear uncertainty (LU) vs. Monte Carlo (MC).
+Example of mTRL uncertainly propagation using multi-sweep measurements.
+The mean value of the sweep is used in the calibration.
+The uncertainty due to the VNA was determined from the multi-sweep as sample covariance.
+The uncertainty due to the standards are estimated using CPW model.
 """
+import os
+import zipfile
 
-import skrf as rf      # for RF stuff
-from skrf.media import Coaxial, CPW
+# pip install numpy matplotlib scikit-rf metas_unclib scipy -U
+import skrf as rf
 import numpy as np
-import matplotlib.pyplot as plt   # for plotting
+import matplotlib.pyplot as plt
+from matplotlib.patches import Ellipse
+import matplotlib.transforms as transforms
+from scipy.stats import norm  # for fitting 2d Gaussian hist
 import metas_unclib as munc
 munc.use_linprop()
 
-# my code
+# umTRL.py and cpw.py should be in same folder 
 from umTRL import umTRL
-import timeit
+from cpw import CPW   # model of CPW
+
+def read_waves_to_S_from_zip(zipfile_full_dir, file_name_contain):
+    # read wave parameter files and convert to S-parameters (from a zip file)
+    with zipfile.ZipFile(zipfile_full_dir, mode="r") as archive:
+        netwks = rf.read_zipped_touchstones(archive)
+        A = rf.NetworkSet([val for key, val in netwks.items() if f'{file_name_contain}_A' in key])
+        B = rf.NetworkSet([val for key, val in netwks.items() if f'{file_name_contain}_B' in key])    
+    freq = A[0].frequency
+    S = rf.NetworkSet( [rf.Network(s=b.s@np.linalg.inv(a.s), frequency=freq) for a,b in zip(A,B)] )
+    return S.mean_s, S.cov(), np.array([s.s for s in S])
+
+def plot_2d_hist(fig,x,y,bins=30):
+    # adapted from: 
+    # https://matplotlib.org/stable/gallery/lines_bars_and_markers/scatter_hist.html
+    # segment the figure
+    gs = fig.add_gridspec(2, 2,  width_ratios=(4, 1), height_ratios=(1, 4),
+                          left=0.1, right=0.9, bottom=0.1, top=0.9,
+                          wspace=0.08, hspace=0.1)
+    # Create the Axes.
+    ax = fig.add_subplot(gs[1, 0])
+    ax_histx = fig.add_subplot(gs[0, 0], sharex=ax)
+    ax_histy = fig.add_subplot(gs[1, 1], sharey=ax)
+    
+    # no labels
+    ax_histx.tick_params(axis="x", labelbottom=False)
+    ax_histx.tick_params(axis="y", left=True, labelleft=True, right=False, labelright=False)
+    ax_histy.tick_params(axis="y", labelleft=False)
+    ax_histy.tick_params(axis="x", labelbottom=False, bottom=False, top=True, labeltop=True)
+    
+    # the scatter plot:
+    ax.scatter(x, y, alpha=0.8)
+    ax_histx.hist(x, bins=bins, density=True, alpha=0.8)    
+    ax_histy.hist(y, bins=bins, orientation='horizontal', density=True, alpha=0.8)
+    
+    return ax, ax_histx, ax_histy
+
+def confidence_ellipse(x, y, ax, n_std=3.0, facecolor='none', **kwargs):
+    ## from here: https://matplotlib.org/stable/gallery/statistics/confidence_ellipse.html
+    """
+    Create a plot of the covariance confidence ellipse of *x* and *y*.
+
+    Parameters
+    ----------
+    x, y : array-like, shape (n, )
+        Input data.
+    ax : matplotlib.axes.Axes
+        The axes object to draw the ellipse into.
+    n_std : float
+        The number of standard deviations to determine the ellipse's radiuses.
+    **kwargs
+        Forwarded to `~matplotlib.patches.Ellipse`
+        
+    Returns
+    -------
+    matplotlib.patches.Ellipse
+    """
+    if x.size != y.size:
+        raise ValueError("x and y must be the same size")
+
+    cov = np.cov(x, y)
+    pearson = cov[0, 1]/np.sqrt(cov[0, 0] * cov[1, 1])
+    # Using a special case to obtain the eigenvalues of this
+    # two-dimensional dataset.
+    ell_radius_x = np.sqrt(1 + pearson)
+    ell_radius_y = np.sqrt(1 - pearson)
+    ellipse = Ellipse((0, 0), width=ell_radius_x * 2, height=ell_radius_y * 2,
+                      facecolor=facecolor, **kwargs)
+
+    # Calculating the standard deviation of x from
+    # the squareroot of the variance and multiplying
+    # with the given number of standard deviations.
+    scale_x = np.sqrt(cov[0, 0]) * n_std
+    mean_x = np.mean(x)
+
+    # calculating the standard deviation of y ...
+    scale_y = np.sqrt(cov[1, 1]) * n_std
+    mean_y = np.mean(y)
+
+    transf = transforms.Affine2D() \
+        .rotate_deg(45) \
+        .scale(scale_x, scale_y) \
+        .translate(mean_x, mean_y)
+    ellipse.set_transform(transf + ax.transData)
+    return ax.add_patch(ellipse)
 
 class PlotSettings:
-    # https://matplotlib.org/3.3.3/tutorials/introductory/customizing.html
+    # to make plots look better for publication
+    # https://matplotlib.org/stable/tutorials/introductory/customizing.html
     def __init__(self, font_size=10, latex=False): 
         self.font_size = font_size 
         self.latex = latex
     def __enter__(self):
-        plt.style.use('seaborn-paper')
+        plt.style.use('seaborn-v0_8-paper')
         # make svg output text and not curves
         plt.rcParams['svg.fonttype'] = 'none'
         # fontsize of the axes title
@@ -43,284 +135,193 @@ class PlotSettings:
     def __exit__(self, exception_type, exception_value, traceback):
         plt.style.use('default')
 
-def plot_with_unc(ax, f, x, ux, label='', title='', f_scale=1e-9, k=2, 
-                  markevery=None, marker=None,markersize=None, alpha=0.3):
-    ax.plot(f*f_scale, x, lw=2, label=label, markevery=markevery, 
-            marker=marker, markersize=markersize)
-    ax.fill_between(f*f_scale, x-ux*k, x+ux*k, alpha=alpha)
-    ax.set_xlabel('Frequency (GHz)')
-    ax.set_xticks(np.arange(0,151,30))
-    ax.set_xlim([0, max(f*f_scale)])
-    return None
-
-def plot_with_unc2(ax, f, x, ux, label='', title='', f_scale=1e-9, k=2, 
-                  markevery=None, marker=None,markersize=None):
-    line = ax.plot(f*f_scale, x, lw=2, label=label, markevery=markevery, 
-            marker=marker, markersize=markersize)
-    ax.plot(f*f_scale, x-ux*k, linestyle=(0, (5, 5)), lw=1.5, color=line[0].get_color())
-    ax.plot(f*f_scale, x+ux*k, linestyle=(0, (5, 5)), lw=1.5, color=line[0].get_color())
-    ax.set_xlabel('Frequency (GHz)')
-    ax.set_xticks(np.arange(0,151,30))
-    ax.set_xlim([0, max(f*f_scale)])
-    return None
-
-def S2T(S):
-    T = S.copy()
-    T[0,0] = -(S[0,0]*S[1,1]-S[0,1]*S[1,0])
-    T[0,1] = S[0,0]
-    T[1,0] = -S[1,1]
-    T[1,1] = 1
-    return T/S[1,0]
-
-def T2S(T):
-    S = T.copy()
-    S[0,0] = T[0,1]
-    S[0,1] = T[0,0]*T[1,1]-T[0,1]*T[1,0]
-    S[1,0] = 1
-    S[1,1] = -T[1,0]
-    return S/T[1,1]
-
-def add_white_noise(NW, sigma=0.01):
-    # add white noise to a network's S-paramters
-    NW_new = NW.copy()
-    noise = (np.random.standard_normal(NW_new.s.shape) 
-             + 1j*np.random.standard_normal(NW_new.s.shape))*sigma
-    NW_new.s = NW_new.s + noise
-    return NW_new
-
-def Qnm(Zn, Zm):
-    # Impedance transformer in T-paramters from on Eqs. (86) and (87) in
-    # R. Marks and D. Williams, "A general waveguide circuit theory," 
-    # Journal of Research (NIST JRES), National Institute of Standards and Technology,
-    # Gaithersburg, MD, no. 97, 1992.
-    # https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4914227/
-    Gnm = (Zm-Zn)/(Zm+Zn)
-    return np.sqrt(Zn.real/Zm.real*(Zm/Zn).conjugate())/np.sqrt(1-Gnm**2)*np.array([[1, Gnm],[Gnm, 1]])
-    
-def TL(l, cpw, Z01=None, Z02=None):
-    # create mismatched transmission line from skrf cpw object
-    # the line function from skrf is not fully correct. it has a 180deg offset 
-    # in the S11 and S22 (I will let them know about it).
-    N = len(cpw.Z0)  # number of frequency points
-    Z01 = cpw.Z0 if Z01 is None else np.atleast_1d(Z01)*np.ones(N)
-    Z02 = Z01 if Z02 is None else np.atleast_1d(Z02)*np.ones(N)
-    S = []
-    for g,zc,z01,z02 in zip(cpw.gamma, cpw.Z0, Z01, Z02):
-        T = Qnm(z01,zc)@np.diag([np.exp(-l*g), np.exp(l*g)])@Qnm(zc,z02)
-        S.append(T2S(T))
-    
-    return rf.Network(s=np.array(S), frequency=cpw.frequency, name='From T2S')
-
-def OSH(l, cpw):
-    # create a offset short networn from cpw object
-    return rf.Network(s=np.array([-np.exp(-2*l*g) for g in cpw.gamma]), frequency=cpw.frequency, name='short')
-
-def ideal_sym_DUT(freq):
-    # ideal lossless, symmetrical, equal reflection and transmission network
-    s = 1/np.sqrt(2)
-    S = np.array([[s, s], [s, s]])
-    return rf.Network(s=np.tile(S, (len(freq.f), 1,1)), frequency=freq)
-
 if __name__=='__main__':
+    # useful functions
     c0 = 299792458   # speed of light in vacuum (m/s)
     mag2db = lambda x: 20*np.log10(abs(x))
     db2mag = lambda x: 10**(x/20)
     gamma2ereff = lambda x,f: -(c0/2/np.pi/f*x)**2
-    alpha2dbmm  = lambda x: mag2db(np.exp(x.real*1e-3))
-    ualpha2dbmm = lambda x: mag2db(munc.umath.exp(munc.umath.real(x)*1e-3))
+    ereff2gamma = lambda x,f: 2*np.pi*f/c0*np.sqrt(-(x-1j*np.finfo(float).eps))  # eps to ensure positive square-root
+    gamma2dbmm  = lambda x: mag2db(np.exp(x.real*1e-3))  # losses dB/mm
     
-    # define frequency range
-    freq = rf.F(1, 150, 299, unit='GHz')
-    f = freq.f
+    path = os.path.dirname(os.path.realpath(__file__)) + '\\FF_ISS_measurements\\'
+    file_name = 'ff_ISS'
+    print('Loading files... please wait!!!')
+    # these data are already corrected with switch term effects
+    L1, L1_cov, L1S = read_waves_to_S_from_zip(path + f'{file_name}_thru.zip', f'{file_name}_thru')
+    L2, L2_cov, L2S = read_waves_to_S_from_zip(path + f'{file_name}_line01.zip', f'{file_name}_line01')
+    L3, L3_cov, L3S = read_waves_to_S_from_zip(path + f'{file_name}_line02.zip', f'{file_name}_line02')
+    L4, L4_cov, L4S = read_waves_to_S_from_zip(path + f'{file_name}_line03.zip', f'{file_name}_line03')
+    L5, L5_cov, L5S = read_waves_to_S_from_zip(path + f'{file_name}_line04.zip', f'{file_name}_line04')
+    L6, L6_cov, L6S = read_waves_to_S_from_zip(path + f'{file_name}_line05.zip', f'{file_name}_line05')
+    OPEN, OPEN_cov, OPENS = read_waves_to_S_from_zip(path + f'{file_name}_open.zip', f'{file_name}_open')
+    f = L1.frequency.f  # frequency axis
     
-    # 1.0 mm coaxial media for calibration error boxes
-    coax1mm = Coaxial(freq, Dint=0.44e-3, Dout=1.0e-3, sigma=1e8)
-    A = coax1mm.line(1, 'm', z0=50, name='A') # left
-    B = coax1mm.line(1.01, 'm', z0=50, name='B') # right
-    
-    # CPW media used for the calibration standards
-    cpw_ori = CPW(freq, w=40e-6, s=25e-6, ep_r=14*(1-0.001j), t=5e-6, rho=2e-8)
+    # plot 2D hist diagrams
+    tiks = [ (np.arange(0.2,0.241, 0.02), np.arange(0.04, 0.122, 0.04), np.arange(0,101,100)),
+             (np.arange(-0.07, -0.049, 0.01), np.arange(-0.06, -0.039, 0.01), np.arange(0,201,200))]
+    f_inx = 119
+    for tik, inx in zip(tiks,[(0,0),(1,0)]):
+        x = L4S[:,f_inx,inx[0],inx[1]].real
+        y = L4S[:,f_inx,inx[0],inx[1]].imag
+        with PlotSettings(14):
+            fig = plt.figure(figsize=(5,5))
+            fig.set_dpi(600)                   
+            ax,axx,axy = plot_2d_hist(fig,x,y)
+            ax.set_xlabel('Real')
+            ax.set_xlim(tik[0][[0,-1]])
+            ax.set_xticks(tik[0])
+            ax.set_ylabel('Imaginary')
+            ax.set_ylim(tik[1][[0,-1]])
+            ax.set_yticks(tik[1])
+            axx.set_ylim(tik[2][[0,-1]])
+            axx.set_yticks(tik[2])
+            axy.set_xlim(tik[0][[0,-1]])
+            axy.set_xticks(tik[2])
         
-    # line standards
-    line_lengths = [0, 0.5e-3, 1.75e-3, 3.5e-3, 3.75e-3, 4.5e-3, 6e-3]
-    lines = [A**TL(l, cpw_ori)**B for l in line_lengths]
+            # Fit a normal distribution to the data:
+            # x data
+            mux, stdx = norm.fit(x)
+            xmin, xmax = ax.get_xlim()
+            xx = np.linspace(xmin, xmax, len(x))
+            p = norm.pdf(xx, mux, stdx)
+            axx.plot(xx, p, 'r', lw=2)
+            # y data
+            muy, stdy = norm.fit(y)
+            ymin, ymax = ax.get_ylim()
+            yy = np.linspace(ymin, ymax, len(y))
+            p = norm.pdf(yy, muy, stdy)
+            axy.plot(p, yy, 'r', lw=2)
+            
+            ax.plot([],[], lw=2, color='red')
+            ax.scatter(mux, muy, c='red', s=3)
+            for n in [1,2,3]:
+                confidence_ellipse(x,y,ax,n_std=n, edgecolor='red', lw=2)
+            mu = L4S.mean(axis=0)
+            ax.legend(['Measured','Estimated'])
+            plt.suptitle(f'Histogram of S{inx[0]+1}{inx[1]+1} at {f[f_inx]*1e-9:.0f}GHz', 
+                 verticalalignment='bottom').set_y(0.94)
+            
+    # mTRL definition
+    lines = [L1, L2, L3, L4, L5, L6]
+    line_lengths = [200e-6, 450e-6, 900e-6, 1800e-6, 3500e-6, 5250e-6]
+    reflect = OPEN
+    reflect_est = 1
+    reflect_offset = -0.1e-3
+    ereff_est = 5.45-0.0001j
     
-    # reflect standard
-    reflect_est = -1
-    reflect_offset = 0
-    SHORT = rf.two_port_reflect( OSH(reflect_offset, cpw_ori) )
-    reflect = A**SHORT**B
+    # CPW model parameters (used for estimation mismatch uncertainty)
+    w, s, wg, t = 49.1e-6, 25.5e-6, 273.3e-6, 4.9e-6
+    Dk = 9.9
+    Df = 0.0
+    sig = 4.11e7  # conductivity of Gold
+    cpw = CPW(w,s,wg,t,f,Dk*(1-1j*Df),sig)
+    cpw.update_jac() # compute the Jacobian of the cpw with respect to its inputs
+        
+    ## define uncertainties
+    # Noise uncertainties
+    uSlines   = np.array([L1_cov, L2_cov, L3_cov, L4_cov, L5_cov, L6_cov]) # measured lines
+    uSreflect = OPEN_cov # measured reflect 
     
-    # embedded DUT
-    dut = ideal_sym_DUT(freq)
-    dut_embed = A**dut**B
+    # length uncertainties
+    l_std = 40e-6  # for the line
+    ulengths  = l_std**2  # the umTRL code will automatically repeat it for all lines
+    l_open_std = 40e-6 # uncertainty in length used for the reflect
     
-    ereff_est = 6+0j
-    
-    # Uncertainties need to be defined as variance/covariance
-    sigma     = 0.004 # S-paramter iid additive noise uncertainty
-    uSlines   = sigma**2 # [sigma**2 for l in line_lengths]
-    ulengths  = (0.02e-3)**2
-    uSreflect = sigma**2
-    sig_ref   = 0.05
-    ureflect  = sig_ref**2
-    
-    # Estimate the covariance of the ereff and mismatch of the cpw
-    # you could just take the equations and compute it manually, but i'm too lazy to that!
-    sigma_er = 0.1
-    M = 2000
-    Z0_mc = []
-    ereff_mc = []
-    for m in range(M):
-        ep_r = 14 + np.random.randn()*sigma_er
-        cpw = CPW(freq, w=40e-6, s=25e-6, ep_r=ep_r*(1-0.001j), t=5e-6, rho=2e-8)
-        Z0_mc.append(cpw.Z0[0])
-        ereff_mc.append(cpw.ep_reff[0])
-    Z0_mc = np.array(Z0_mc)
-    ereff_mc = np.array(ereff_mc)
-    G_mc = (Z0_mc-cpw_ori.Z0[0])/(Z0_mc+cpw_ori.Z0[0])
-    uereff_Gamma = np.cov([ereff_mc.real, ereff_mc.imag, G_mc.real, G_mc.imag])
-    # uereff_Gamma = np.array([0.05, 0.5e-4, 0.002, 1.5e-7])**2
-    
-    # Monte Carlo simulation
-    tic_mc = timeit.default_timer()
-    M = 100
-    ereff_mc = []
-    gamma_mc = []
-    dut_cal_mc_s11 = []
-    dut_cal_mc_s21 = []
-    for m in range(M):
-        # include all uncertainties
-        cpws = [CPW(freq, w=40e-6, s=25e-6, ep_r=(14 + np.random.randn()*sigma_er)*(1-0.001j), 
-                    t=5e-6, rho=2e-8) for l in line_lengths]
-        lines2 = [A**TL(l+np.random.randn()*np.sqrt(ulengths), cpw_mc, cpw_ori.Z0)**B for l,cpw_mc in zip(line_lengths,cpws)]        
-        lines_mc        = [add_white_noise(x, sigma) for x in lines2]
+    # cross-section uncertainties
+    w_std   = 2.55e-6
+    s_std   = 2.55e-6
+    wg_std  = 2.55e-6
+    t_std   = 0.49e-6
+    Dk_std  = 0.2
+    Df_std  = 0
+    sig_std = sig*0.1
 
-        SHORT2 = rf.two_port_reflect( add_white_noise( OSH(reflect_offset, cpw_ori), np.sqrt(ureflect)), 
-            add_white_noise( OSH(reflect_offset, cpw_ori), np.sqrt(ureflect)) )
-        
-        reflect2   = A**SHORT2**B
-        reflect_mc = add_white_noise(reflect2, sigma)
-        
-        cal_mc = umTRL(lines=lines_mc, line_lengths=line_lengths, reflect=reflect_mc, 
-                   reflect_est=reflect_est, reflect_offset=reflect_offset, 
-                   ereff_est=ereff_est)
-        cal_mc.run_mTRL()
-        dut_cal_mc = cal_mc.apply_cal(dut_embed)[0]
-        
-        ereff_mc.append(cal_mc.ereff)
-        gamma_mc.append(cal_mc.gamma)
-        dut_cal_mc_s11.append(dut_cal_mc.s[:,0,0])
-        dut_cal_mc_s21.append(dut_cal_mc.s[:,1,0])
-    ereff_mc = np.array(ereff_mc)
-    gamma_mc = np.array(gamma_mc)
-    dut_cal_mc_s11 = np.array(dut_cal_mc_s11)
-    dut_cal_mc_s21 = np.array(dut_cal_mc_s21)
-    toc_mc = timeit.default_timer()
+    # line mismatch uncertainty
+    U = np.diag([w_std,s_std,wg_std,t_std,Dk_std,Df_std,sig_std])**2
+    uereff_Gamma_i = np.array([ np.vstack((x,y)).dot(U).dot(np.vstack((x,y)).T) for x,y in zip(cpw.jac_ereff,cpw.jac_Gamma)])
+    uereff_Gamma   = [uereff_Gamma_i]*len(lines) # repeat for all lines
     
-    # linear uncertainty
-    tic_lu = timeit.default_timer()
-    cal_lu = umTRL(lines=lines, line_lengths=line_lengths, reflect=reflect, 
+    # open asymmetry
+    # the uncertainty is computed analyically as an offset asymmetry between the ports
+    diff_open = lambda g,l: -2*g*np.exp(-2*g*l)
+    ureflect     = np.array([ np.array([[diff_open(g,reflect_offset).real],[diff_open(g,reflect_offset).imag]]).dot(
+        np.array([[diff_open(g,reflect_offset).real],[diff_open(g,reflect_offset).imag]]).T)*l_open_std**2 for g in cpw.gamma])
+    
+    # mTRL with linear uncertainty evaluation
+    cal = umTRL(lines=lines, line_lengths=line_lengths, reflect=reflect, 
                reflect_est=reflect_est, reflect_offset=reflect_offset, 
-               ereff_est=ereff_est, switch_term=None,
-               uSlines=uSlines, ulengths=ulengths, uSreflect=uSreflect, 
-               ureflect=ureflect, uereff_Gamma=uereff_Gamma,
-               )
-    cal_lu.run_umTRL()
-    toc_lu = timeit.default_timer()
+               ereff_est=ereff_est,
+               uSlines=uSlines, uSreflect=uSreflect,
+               ulengths=ulengths,
+               ureflect=ureflect, uereff_Gamma=uereff_Gamma)
+    cal.run_umTRL() # run mTRL with linear uncertainty propagation
     
-    print(f'MC time: {toc_mc-tic_mc:.4f} seconds')
-    print(f'LU time: {toc_lu-tic_lu:.4f} seconds')
+    dut_embed = L6
+    dut_cal, dut_cal_S = cal.apply_cal(dut_embed)
     
-    dut_cal_lu, dut_cov = cal_lu.apply_cal(dut_embed)
-    dut_cal_lu_S = np.array([munc.ucomplexarray(x, covariance=y) for x,y 
-                       in zip(dut_cal_lu.s.squeeze(), dut_cov)])
-    
-    ## PLOTS
-    
-    # dielectric constant and losses
+    # plot data and uncertainty
+    k = 2 # coverage factor
     with PlotSettings(14):
-        fig, axs = plt.subplots(1,2, figsize=(10,3))        
+        fig, axs = plt.subplots(2,2, figsize=(10,7))        
         fig.set_dpi(600)
-        fig.tight_layout(pad=1.5)
-        ax = axs[0]
-        plot_with_unc(ax, f, munc.get_value(cal_lu.ereff).real, 
-                  munc.get_stdunc(cal_lu.ereff).real, 
-                  label='Proposed LU method', marker='^', markevery=20, markersize=10)
-        plot_with_unc(ax, f, ereff_mc.real.mean(axis=0), 
-                      ereff_mc.real.std(axis=0), 
-                      label='MC method', marker='v', markevery=20, markersize=10)
-        ax.plot(f*1e-9, cpw_ori.ep_reff.real*np.ones(len(f)),  
-                lw=2, label='True value', color='black')
-        ax.set_ylabel('Effective permittivity')
-        ax.set_ylim([6.2, 6.8])
-        ax.set_yticks(np.arange(6.2, 6.81, 0.2))
+        fig.tight_layout(pad=2)
+        ax = axs[0,0]
+        mu  = munc.get_value(cal.ereff).real
+        std = munc.get_stdunc(cal.ereff).real
+        ax.plot(f*1e-9, mu, lw=2, label='mTRL linear propagation')
+        ax.fill_between(f*1e-9, mu-std*k, mu+std*k, alpha=0.3)
+        ax.set_xlabel('Frequency (GHz)')
+        ax.set_ylabel('Relative effective permittivity')
+        ax.set_ylim([4.5, 6.5])
+        #ax.set_yticks(np.arange(4.5, 6.01, 0.3))
+        ax.set_xlim(0,150)
+        ax.set_xticks(np.arange(0,151,30))
+        #ax.legend()
         
-        ax = axs[1]
-        losses_dbmm = ualpha2dbmm(cal_lu.gamma)
-        plot_with_unc(ax, f, munc.get_value(losses_dbmm).real, 
-                      munc.get_stdunc(losses_dbmm).real, 
-                      label='Proposed LU method', marker='^', 
-                      markevery=20, markersize=10)
-        losses_dbmm_mc = alpha2dbmm(gamma_mc.real)
-        plot_with_unc(ax, f, losses_dbmm_mc.mean(axis=0), 
-                      losses_dbmm_mc.std(axis=0), 
-                      label='MC method', marker='v', 
-                      markevery=20, markersize=10)
-        ax.plot(f*1e-9, alpha2dbmm(cpw_ori.gamma.real),  
-                lw=2, label='True value', color='black')
-        ax.set_ylabel('Losses (dB/mm)')
-        ax.set_ylim([0, 0.3])
-        ax.set_yticks(np.arange(0, 0.35, 0.1))
-        handles, labels = ax.get_legend_handles_labels()
-        fig.legend(handles, labels, bbox_to_anchor=(0.5, 0.98), 
-                   loc='lower center', ncol=3, borderaxespad=0)
-        plt.suptitle("Effective permittivity and losses per-unit-length", 
-             verticalalignment='bottom').set_y(1.1)
-
-    # calibrated DUT S11 and S21
-    with PlotSettings(14):
-        fig, axs = plt.subplots(1,2, figsize=(10,3))        
-        fig.set_dpi(600)
-        fig.tight_layout(pad=1.3)
-        ax = axs[0]
-        S11abs = abs(dut_cal_lu_S[:,0,0])
-        plot_with_unc(ax, f, munc.get_value(S11abs).real, 
-                      munc.get_stdunc(S11abs).real, 
-                      label='Proposed LU method', marker='^', 
-                      markevery=20, markersize=10)
-        S11abs_mc = abs(dut_cal_mc_s11)
-        plot_with_unc(ax, f, S11abs_mc.mean(axis=0), 
-                      S11abs_mc.std(axis=0), label='MC method', marker='v', 
-                      markevery=20, markersize=10)
-        S11abs_true = abs(dut.s[:,0,0])
-        ax.plot(f*1e-9, S11abs_true,  
-                lw=2, label='True value', color='black')
+        ax = axs[0,1]
+        loss_dbmm_mTRL_model_lin = gamma2dbmm(cal.gamma)
+        mu  = munc.get_value(loss_dbmm_mTRL_model_lin)
+        std = munc.get_stdunc(loss_dbmm_mTRL_model_lin)
+        ax.plot(f*1e-9, mu, lw=2, label='mTRL linear propagation')
+        ax.fill_between(f*1e-9, mu-std*k, mu+std*k, alpha=0.3)
+        ax.set_xlabel('Frequency (GHz)')
+        ax.set_ylabel('Loss (dB/mm)')
+        ax.set_ylim([0, 1.5])
+        #ax.set_yticks(np.arange(0, 1.51, 0.3))
+        ax.set_xlim(0,150)
+        ax.set_xticks(np.arange(0,151,30))
+        #ax.legend()
+        
+        ax = axs[1,0]
+        mu  = munc.get_value(abs(dut_cal_S[:,0,0])).squeeze()
+        std = munc.get_stdunc(abs(dut_cal_S[:,0,0])).squeeze()
+        ax.plot(f*1e-9, mu, lw=2, label='mTRL linear propagation')
+        ax.fill_between(f*1e-9, mu-std*k, mu+std*k, alpha=0.3)
+        ax.set_xlabel('Frequency (GHz)')
         ax.set_ylabel('S11 (mag)')
-        ax.set_ylim([0.6, 0.8])
-        ax.set_yticks(np.arange(0.6, 0.85, 0.1))
+        ax.set_ylim([-0.06, 0.1])
+        #ax.set_yticks(np.arange(.5, 0.91, 0.1))
+        ax.set_xlim(0,150)
+        ax.set_xticks(np.arange(0,151,30))
+        #ax.legend()
         
-        ax = axs[1]
-        S21abs = abs(dut_cal_lu_S[:,1,0])
-        plot_with_unc(ax, f, munc.get_value(S21abs).real, 
-                      munc.get_stdunc(S21abs).real, 
-                      label='Proposed LU method', marker='^', 
-                      markevery=20, markersize=10)
-        S21abs_mc = abs(dut_cal_mc_s21)
-        plot_with_unc(ax, f, S21abs_mc.mean(axis=0), 
-                      S21abs_mc.std(axis=0), label='MC method', marker='v', 
-                      markevery=20, markersize=10)
-        S21abs_true = abs(dut.s[:,1,0])
-        ax.plot(f*1e-9, S11abs_true,  
-                lw=2, label='True value', color='black')
+        ax = axs[1,1]
+        mu  = munc.get_value(abs(dut_cal_S[:,1,0])).squeeze()
+        std = munc.get_stdunc(abs(dut_cal_S[:,1,0])).squeeze()
+        ax.plot(f*1e-9, mu, lw=2, label='mTRL linear propagation')
+        ax.fill_between(f*1e-9, mu-std*k, mu+std*k, alpha=0.3)
+        ax.set_xlabel('Frequency (GHz)')
         ax.set_ylabel('S21 (mag)')
-        ax.set_ylim([0.6, 0.8])
-        ax.set_yticks(np.arange(0.6, 0.85, 0.1))
-        handles, labels = ax.get_legend_handles_labels()
-        fig.legend(handles, labels, bbox_to_anchor=(0.5, 0.98), 
-                   loc='lower center', ncol=3, borderaxespad=0)
-        plt.suptitle("Calibrated DUT", 
-             verticalalignment='bottom').set_y(1.1)
+        ax.set_ylim([0.5, 1])
+        #ax.set_yticks(np.arange(.5, 0.91, 0.1))
+        ax.set_xlim(0,150)
+        ax.set_xticks(np.arange(0,151,30))
+        #ax.legend()
+    
+        plt.suptitle(r"CPW parameters and calibrated DUT with 95% uncertainty bounds ($2\times\sigma$)", 
+             verticalalignment='bottom').set_y(0.98)
         
     plt.show()
     
+    # EOF

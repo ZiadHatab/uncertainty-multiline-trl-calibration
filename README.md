@@ -1,14 +1,22 @@
 # Uncertainty Multiline TRL Calibration
-A multiline thru-reflect-line (TRL) calibration inclusive linear uncertainty propagation capabilities.
+
+A multiline thru-reflect-line (TRL) calibration inclusive linear uncertainty propagation.
 
 ## About the implementation
 
-This is an extension of my original [mTRL algorithm](https://github.com/ZiadHatab/multiline-trl-calibration) [1] with linear uncertainty capabilities. For computation of derivatives (Jacobian), I used Automatic differentiation (AD) method, in which I used the package METAS UncLib [2] for that. All uncertainties are defined as covariance matrices as function of frequency. If only one covariance matrix is given, the code will repeat it along the frequency. If only a scalar variance is given, then a diagonal covariance matrix is generated and repeated along the frequency. For those of you interested on how I approached the problem, you can read a summary of the work in [3]: [https://arxiv.org/abs/2206.10209](https://arxiv.org/abs/2206.10209)
+This extension of my original mTRL algorithm [1] includes linear uncertainty capabilities. I used Automatic differentiation (AD) with help of the package METAS UncLib [2] to compute derivatives (Jacobian). All uncertainties are defined as frequency-dependent covariance matrices. In current implementation, the following uncertainties can be propagated:
 
-In comparison to my work in [1], I simplified the mTRL implementation a bit to easily propagate uncertainties. In [1] I used optimization procedure to compute the propagation constant, which afterwards I used to compute the weighting matrix *W*. In the current implementation, the propagation constant is not directly part of the calibration solution, because the weighting matrix is now computed directly using Takagi decomposition from the line measurements. Of course, an estimate of the propagation constant is still needed to resolve sign ambiguity. Additionally, a proper estimate of the propagation constant is determined after solving the eigenvalue problem, which can be used later, e.g., to shift reference plane. A summery flow diagram is depicted blow. In each step, the input uncertainties (covariance) are propagated through each step.
+* S-parameter measurement noise.
+* Line length uncertainty.
+* Reflect asymmetry.
+* Line mismatch.
 
-![ex1_ereff_loss](images/mTRL_flow_diagram.png)
+If you're interested in how I approached the problem, you can read a summary of the work in [3], or an in-depth details in [4].
 
+In comparison to my previous work [1], I simplified the mTRL implementation to easily propagate uncertainties. In [1], I used an optimization procedure to compute the propagation constant, which was then used to compute the weighting matrix *W*. In this current implementation, the propagation constant is not directly part of the calibration solution. Instead, the weighting matrix is computed directly using Takagi decomposition from line measurements. However, an estimate of the propagation constant is still needed to resolve sign ambiguity. The estimate of the propagation constant is determined after solving the eigenvalue problem, which can be used later, for example, to shift the reference plane. A summary flow diagram is depicted below. In each step, the input uncertainties (covariance) are propagated through each step.
+
+![mTRL_flow_diagram](images/mTRL_flow_diagram.png)
+*mTRL calibration forward flow diagram.*
 
 ## Code requirements
 
@@ -28,7 +36,7 @@ python -m pip install --pre pythonnet
 
 ## How to use
 
-Here is a simple pseudo-code on how it works. If you use the uncertainty mode, all data will be in METAS uncertainty type (except for calibrated network, those are provided as a skrf type). The functions to shift reference plane and to renormalize the impedance are the same as in my other [repo](https://github.com/ZiadHatab/multiline-trl-calibration).
+Here is a simple pseudo-code on how it works. If you use the uncertainty mode, all data will be in METAS uncertainty type (except for calibrated network, those are provided as a skrf type). Other auxiliary functions, as shifting reference plane, renormalize reference impedance, and 12-term conversion are the same as in my other [repo](https://github.com/ZiadHatab/multiline-trl-calibration).
 
 ```python
 import skrf as rf
@@ -39,7 +47,7 @@ munc.use_linprop()
 # my code
 from umTRL import umTRL
 
-# Measured calibration standards
+# Measured calibration standards (in same folder)
 L1    = rf.Network('measured_line_1.s2p')
 L2    = rf.Network('measured_line_2.s2p')
 L3    = rf.Network('measured_line_3.s2p')
@@ -54,15 +62,16 @@ reflect_offset = 0
 
 # uncertainties (simple case of providing variances)
 # S-parameters measurement uncertainties 
-sigma     = 0.002 # iid AWGN
+sigma     = 0.002 # iid Gaussian noise
 uSlines   = sigma**2 # measured lines
 uSreflect = sigma**2 # measured reflect 
 
 ulengths  = (0.02e-3)**2  # uncertainty in length
-ureflect  = np.array([0.01, 0])**2  # uncertainty in the reflect standard
+ureflect  = np.diag([0.01, 0])**2  # uncertainty in the reflect standard (real and imag)
 
-# mismatch uncertainty (check example 2 or 3)
-uereff_Gamma = np.array([0.05, 0.5e-4, 0.002, 1.5e-7])**2 
+# mismatch uncertainty 
+# for this to make sense, check the examples, and also read about in [4]
+uereff_Gamma = np.diag([0.05, 0.5e-4, 0.002, 1.5e-7])**2 
 
 # define the calibration
 cal = umTRL(lines=lines, line_lengths=line_lengths, reflect=reflect, 
@@ -72,130 +81,143 @@ cal = umTRL(lines=lines, line_lengths=line_lengths, reflect=reflect,
                ureflect=ureflect, uereff_Gamma=uereff_Gamma,
                )
 
-cal.run_umTRL()      # run mTRL with uncertainty evaluation
-# cal.run_mTRL()  # this runs mTRL without uncertainties. Very fast, as METAS package not used.
+cal.run_umTRL()   # run mTRL with uncertainty evaluation
+# cal.run_mTRL()    # this runs mTRL without uncertainties. Very fast, as METAS package is not used.
 
-dut = rf.Network('measured_dut.s2p')
-cal_dut, cov = cal.apply_cal(dut)  # apply cal to a dut and return also frequency-dependent covariance
+dut = rf.Network('measured_dut.s2p') # in same folder
+cal_dut, cal_dut_S_metas = cal.apply_cal(dut)  # apply cal to a dut and return also S-parameters in METAS datatype.
 
-# propagation constant and effective relative dielectric constant
+# propagation constant and effective relative dielectric constant (in METAS datatype)
 gamma = cal.gamma
 ereff = cal.ereff
 
+# NOTE: you can extract the uncertainties directly from METAS datatype, check their Python API:
+# https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html
 ```
 
-## How to define covariance matrices
+## Defining Covariance Matrices
 
-If you look in the above example, or even in the other examples, you will notice that I never actually fully define a covariance matrix, not to mention a frequency-dependent one. In most cases, you probably would never actually define a full covariance matrix. However, I’m almost certain that this will cause confusion to some people. So, I will demonstrate here the most general case, and go down to the most simple case.
+You may have noticed that I don't fully define a covariance matrix in the examples. This is because, in most cases, you don't need to fully define a covariance matrix. However, I understand that this may cause confusion for some people. Therefore, I will demonstrate how to define the most general and the most simple cases of covariance matrices for mTRL calibration.
 
-Before I talk about how you write covariance matrices for mTRL calibration. Let me summarize some basics you should be aware of when dealing with covariance matrices:
+Before I discuss how to write covariance matrices for mTRL calibration, here are a few basics you should be aware of when dealing with covariance matrices:
 
-- The covariance of a real scalar is just the variance (scalar).
-- The covariance of a complex scalar is a 2x2 matrix. The first entry is for the real part, the second for the imaginary part (If already known in polar coordinates, you need to transform it to cartesian coordinates).
-- The covariance of a *NxM* real matrix is a *(NM)x(NM)* matrix. To be honest, covariance is actually defined for vectors. The way people generalized it to matrices is by computing the covariance of the vectorized version of the matrix using the [vec() operator](https://en.wikipedia.org/wiki/Vectorization_%28mathematics%29), which basically creates a vector from the matrix by stacking its columns. That is why the covariance has a dimension of *(NM)x(NM)*.
-- The covariance of a *NxM* complex matrix is a *(2NM)x(2NM)* matrix. This is because we actually have two matrices, one for the real part and the second for the imaginary part. Remember, the order is real then imaginary, for each element.
-- If the elements in a matrix (or vector) are independent, then the corresponding covariance matrix is a diagonal matrix. The diagonal elements are the variances of the elements.
+* The covariance of a real scalar is simply the variance (scalar).
+* The covariance of a complex scalar is a 2x2 matrix. The first entry is for the real part, and the second entry is for the imaginary part (if it's already known in polar coordinates, you need to transform it to cartesian coordinates).
+* The covariance of a *NxM* real matrix is a *(NM)x(NM)* matrix. To be honest, covariance is defined for vectors. The way people generalized it to matrices is by computing the covariance of the vectorized version of the matrix using the [vec() operator](https://en.wikipedia.org/wiki/Vectorization_%28mathematics%29), which creates a vector from the matrix by stacking its columns. That's why the covariance has a dimension of *(NM)x(NM)*.
+* The covariance of a *NxM* complex matrix is a *(2NM)x(2NM)* matrix. This is because we have two matrices, one for the real part and the second for the imaginary part. Remember, the order is real then imaginary for each element.
+* If the elements in a matrix (or vector) are independent, then the corresponding covariance matrix is a diagonal matrix. The diagonal elements are the variances of the elements.
 
-### frequency-dependent covariance
+### Frequency-dependent covariance
 
-This is the most general case, where you know the covariance at each frequency point. We do, however, assume independency between the frequency points. For example, if we have *K* frequency points of 2-port S-parameters measurement. The resulting covariance would be a 3D array of the size: *Kx8x8.* Basically, we have at each frequency point a 8x8 covariance matrix.
+This is the most general case, where you know the covariance at each frequency point. However, we assume independency between the frequency points. For example, if we have *K* frequency points of 2-port S-parameters measurement. The resulting covariance would be a 3D array of the size: *Kx8x8.* Essentially, we have a 8x8 covariance matrix at each frequency point.
 
 ```python
 covS = np.array([ [[cov1]], [[cov2]], ...,  [[covK]] ])
 ```
 
-Another example, which is maybe unrealistic, let’s assume we have *N* line standards with uncertainty in their lengths. Let’s assume, the machine that made the transmission lines has some memory effect, where every time it moves to fabricate another transmission line the uncertainty of the previous line affects the uncertainty of the next line (i.e., correlation). Now, to make it even more unrealistic, let say the uncertainty changes with frequency. In any case, the size of the total covariance is now *KxNxN* (remember, we have at each frequency point a *NxN* covariance, as we are working with lengths, i.e., real numbers)*.*
+### Frequency-independent covariance
 
-### frequency-independent covariance
-
-So, let’s say the covariance repeats along the frequency. One way to define the total covariance is just to repeat a the single covariance *K*-times:
+In some cases, the covariance is the same at every frequency point. One way to define the total covariance is to repeat a single covariance matrix *K* times, where *K* is the number of frequency points:
 
 ```python
 Cov = np.tile(cov, reps=(K,1,1))
 ```
 
-Alternatively, I wrote my mTRL code so that you can just give the code only a single covariance and it will repeat it along the frequency automatically. You just write
+Alternatively, you can use my mTRL code and pass a single covariance matrix. The code will automatically repeat it along the frequency:
 
 ```python
-Cov = cov  # where cov is a single covariance of a set of paramters, e.g., S-paramters or lengths ... 
+Cov = cov  # where cov is a single covariance matrix of a set of parameters, e.g., S-parameters or lengths.
 ```
 
-### correlation-free covariance
+### Correlation-free covariance
 
-In some cases, the covariance might describe independent elements, i.e., the covariance is a diagonal matrix. In such cases you could just write the diagonal matrix directly like
+In some cases, the covariance matrix describes independent elements, i.e., it is a diagonal matrix. In such cases, you can write the diagonal matrix directly:
 
 ```python
 cov = np.diag([var1, var2, ..., varN])
 ```
 
-Alternatively, you could just pass the vector directly. I wrote the code such that it diagonalize it automatically if given a vector:
+Alternatively, you can pass a vector of variances directly. The code will automatically diagonalize it to a covariance matrix:
 
 ```python
 cov = np.array([var1, var2, ..., varN])
 ```
 
-### equal-variance covariance
+### Equal-variance covariance
 
-The most simple case, you find me using it often, is when you assume all parameters having the same variance and are independent. Basically, the covariance matrix is a variance value multiplied by an identity matrix.
+The most simple case, which I use often, is when you assume all parameters have the same variance and are independent. In this case, the covariance matrix is a variance value multiplied by an identity matrix.
 
 ```python
 cov = var*np.eye(N)
 ```
 
-In my code, you can just pass a scalar as covariance and the code will automatically expand it to a diagonal matrix. 
+You can also pass a scalar as the covariance. The code will automatically expand it to a diagonal matrix. I often use this to assign uncertainty in the length of the lines.
 
 ```python
 cov = var
 ```
 
-For example, I often use this to assign uncertainty in the length of the lines.
+### Limitations
 
-### what you cannot do
-If your covariance matrix is frequency-dependent, then you have to define it manually, as in the first general case. Even if it is only constructed from variances. If it changes with frequency, you need to explicitly define the covariance matrix at each frequency point. The simplification cases I mentioned before are meant to be used when you have frequency-independent covariance/variance. 
+If your covariance matrix varies with frequency, you must define it manually as in the first general case. Even if it is only constructed from variances, you need to explicitly define the covariance matrix at each frequency point. The simplification cases mentioned earlier are meant to be used when you have frequency-independent covariance or variance.
 
-## TO-DO
+## To-Do List
 
-This is ongoing work and it will continuously get updated. For now, there are a few things I planned:
+This project is ongoing and will be continuously updated. Currently, there are a few planned updates:
 
-- The code at the moment takes only one reflect standard. To be honest, I intentionally want it to handle only one reflect standard, as the code is starting to get messy. I will update the code later to take multiple reflect standards.
-- I will try to include probing and repeatability uncertainties. I’m not sure exactly about the details, but I will figure that out. At the moment the code can handle the following uncertainties: measurement, length, reflect and mismatch uncertainties.
-- I said this in my other [repo](https://github.com/ZiadHatab/multiline-trl-calibration), I will also try here to include a proper documentation for this code (I’m bad at time management, so don’t expect it any time soon). For now, if anyone has a question, just ask me directly here or write me at zi.hatab@gmail.com (or z.hatab@tugraz.at).
+* The code currently only handles one reflect standard. I intend to update it later to handle multiple reflect standards, as the code is becoming complex.
+* I plan to include probing and repeatability uncertainties in the future. The details are still being worked out.
+* I plan to eventually rewrite the code to eliminate its dependency on the METAS uncLib package. I might consider using numerical Jacobian methods. I will see what is most appropriate method without loss of accuracy.
 
 ## Examples
 
-### example 1 — on-wafer ISS calibration
+### example 1 — calibration on MPI cal substrate
 
-This example shows you how to perform 1st-tier mTRL calibration with uncertainty treatment. The variances that I have given in this example are not the actual uncertainties of the calibration standards nor the VNA. I just roughly estimated some numbers to showcase how the code works. 
+The data in this example is quite old, but it demonstrates how to generally apply the calibration with switch terms and propagate uncertainties. The uncertainties provided in this example are not the actual uncertainties of the calibration standards or the VNA. They are just arbitrary numbers I came up with to show how the code works. Also, be carful when interpreting the uncertainties of magnitude values around zero. The linear propagation approach can be misleading, as these uncertainties do not follow Gaussian.
 
-![ex1_ereff_loss](images/Untitled.png)
+!['mpi_iss_cal_meas'](images/mpi_iss_cal_meas.png)
+*Relative effective permittivity and loss, as well as S11 and S21 of calibrated DUT (line standard) with 95% uncertainty coverage.*
 
-![ex1_cal_dut](images/Untitled%201.png)
+### example 2 — calibration on FF cal substrate
 
-### example 2 — linear uncertainty (LU) vs. Monte Carlo (MC)
+The data I used here is more recent and was also used in [4]. The measurements were taken across multiple frequency sweeps, allowing me to estimate the covariance of noise from the VNA for each standard (see histograms below as an example). The uncertainties in the CPW structures were estimated using a CPW model (see `cpw.py`).
 
-According to GUM (Guide to the Expression of Uncertainty in Measurement), the best way to verify the validity of linear uncertainty propagation is by comparing it against full Monte Carlo method. So, to mimic a scenario where there are randomness in the calibration standards, I opted for simulated data, where I can control everything about the standards. In below images I considered all uncertainties (except switch terms), and MC was done for 100 trials (it gets better if you increase the trials, and slower!). 
+![](images/hist_2d_S11.png)  |  ![](images/hist_2d_S21.png)
+:-------------------------:|:-------------------------:
 
-![ex2_ereff_loss](images/Untitled%202.png)
+!['ff_iss_cal_meas'](images/ff_iss_cal_meas.png)
+*Relative effective permittivity and loss, as well as S11 and S21 of calibrated DUT (line standard) with 95% uncertainty coverage.*
 
-![ex2_cal_dut](images/Untitled%203.png)
+### example 3 — linear uncertainty vs. Monte Carlo
 
-### example 3 — contribution of each uncertainty type
+The most effective way to validate the linear uncertainty propagation method is by comparing it to the full Monte Carlo method. To simulate random variations in the calibration standards, I used the error-boxes from the measurements and generated CPW calibration standards with the cpw model (see `cpw.py`), which are embedded within the error-boxes. The DUT used in this example is a dummy device with equal reflection and transmission, to observe the effects of calibration on both S11 and S21 equally.
 
-This is basically a breakdown of the previous example, where I show the contribution of each input uncertainty in the output uncertainty.
+!['lin_vs_MC'](images/unc_lin_vs_MC.png)
+*Comparison between linear uncertainty propagation and Monte Carlo analysis. The uncertainty bounds correspond to 95% coverage.*
 
-![ex3_ereff_loss](images/Untitled%204.png)
+This example also includes a breakdown of the uncertainty budget based on the type of uncertainty and the individual standards.
 
-![ex3_cal_dut](images/Untitled%205.png)
+!['cpw_unc_budget_types'](images/cpw_unc_budget_types.png)
+*95% uncertainty budget with respect to uncertainty types.*
+
+!['mpi_iss_cal_meas'](images/cpw_unc_budget_standards.png)
+*95% uncertainty budget with respect to calibration standards.*
+
+## Crediting
+
+If you found this tool useful and used it in a publication, please consider citing reference [4]. You can also cite [3] as well, but citing [4] is sufficient.
 
 ## References
 
-- [1] Z. Hatab, M. Gadringer and W. Bösch, "Improving The Reliability of The Multiline TRL Calibration Algorithm," 2022 98th ARFTG Microwave Measurement Conference (ARFTG), 2022, pp. 1-5, doi: [10.1109/ARFTG52954.2022.9844064](https://ieeexplore.ieee.org/document/9844064). 
-    
-    
-- [2] M. Zeier, J. Hoffmann, and M. Wollensack, "Metas.UncLib—a measurement uncertainty calculator for advanced problems," Metrologia, vol. 49, no. 6, pp. 809–815, nov 2012. [https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html](https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html)
-    
-- [3] Z. Hatab, M. Gadringer, and W. Bosch, "Propagation of Measurement and Model Uncertainties through Multiline TRL Calibration," online: [https://arxiv.org/abs/2206.10209](https://arxiv.org/abs/2206.10209)
+* [1] Z. Hatab, M. Gadringer and W. Bösch, "Improving The Reliability of The Multiline TRL Calibration Algorithm," 2022 98th ARFTG Microwave Measurement Conference (ARFTG), 2022, pp. 1-5, doi: [10.1109/ARFTG52954.2022.9844064](https://ieeexplore.ieee.org/document/9844064).
+
+* [2] M. Zeier, J. Hoffmann, and M. Wollensack, "Metas.UncLib—a measurement uncertainty calculator for advanced problems," Metrologia, vol. 49, no. 6, pp. 809–815, nov 2012. [https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html](https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html)
+
+* [3] Z. Hatab, M. Gadringer, and W. Bösch, "Propagation of Measurement and Model Uncertainties through Multiline TRL Calibration," 2022 Conference on Precision Electromagnetic Measurements (CPEM), Wellington, New Zealand, 2022, pp. 1-2, , doi: *I will update when available*. e-print: [https://arxiv.org/abs/2206.10209](https://arxiv.org/abs/2206.10209)
+
+* [4] Z. Hatab, M. Gadringer, and W. Bösch, "Propagation of Linear Uncertainties through Multiline Thru-Reflect-Line Calibration," e-print: *I will update this soon*
 
 ## About the license
 
-Code in this repo is under the BSD-3-Clause license. However, to be able to actually use my code you need to install METAS UncLib package, which is under their own license [https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html](https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html).
+The code in this repository is licensed under the BSD-3-Clause license. However, in order to use it, you also need to install the METAS UncLib package, which has its own separate license. [https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html](https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html)
+
