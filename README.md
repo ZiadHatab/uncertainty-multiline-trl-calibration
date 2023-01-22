@@ -137,12 +137,6 @@ In some cases, the covariance matrix describes independent elements, i.e., it is
 cov = np.diag([var1, var2, ..., varN])
 ```
 
-Alternatively, you can pass a vector of variances directly. The code will automatically diagonalize it to a covariance matrix:
-
-```python
-cov = np.array([var1, var2, ..., varN])
-```
-
 ### Equal-variance covariance
 
 The most simple case, which I use often, is when you assume all parameters have the same variance and are independent. In this case, the covariance matrix is a variance value multiplied by an identity matrix.
