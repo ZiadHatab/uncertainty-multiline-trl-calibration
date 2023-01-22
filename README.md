@@ -193,7 +193,7 @@ The data I used here is more recent and was also used in [4]. The measurements w
 The most effective way to validate the linear uncertainty propagation method is by comparing it to the full Monte Carlo method. To simulate random variations in the calibration standards, I used the error-boxes from the measurements and generated CPW calibration standards with the cpw model (see `cpw.py`), which are embedded within the error-boxes. The DUT used in this example is a dummy device with equal reflection and transmission, to observe the effects of calibration on both S11 and S21 equally.
 
 !['lin_vs_MC'](images/unc_lin_vs_MC.png)
-*Comparison between linear uncertainty propagation and Monte Carlo analysis. The uncertainty bounds correspond to 95% coverage.*
+*Comparison between linear uncertainty propagation and Monte Carlo analysis (100 trials). The uncertainty bounds correspond to 95% coverage.*
 
 This example also includes a breakdown of the uncertainty budget based on the type of uncertainty and the individual standards.
 
@@ -209,9 +209,9 @@ If you found this tool useful and used it in a publication, please consider citi
 
 ## References
 
-* [1] Z. Hatab, M. Gadringer and W. Bösch, "Improving The Reliability of The Multiline TRL Calibration Algorithm," 2022 98th ARFTG Microwave Measurement Conference (ARFTG), 2022, pp. 1-5, doi: [10.1109/ARFTG52954.2022.9844064](https://ieeexplore.ieee.org/document/9844064).
+* [1] Z. Hatab, M. Gadringer and W. Bösch, "Improving The Reliability of The Multiline TRL Calibration Algorithm," 2022 98th ARFTG Microwave Measurement Conference (ARFTG), 2022, pp. 1-5, doi: [10.1109/ARFTG52954.2022.9844064](http://dx.doi.org/10.1109/ARFTG52954.2022.9844064).
 
-* [2] M. Zeier, J. Hoffmann, and M. Wollensack, "Metas.UncLib—a measurement uncertainty calculator for advanced problems," Metrologia, vol. 49, no. 6, pp. 809–815, nov 2012. [https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html](https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html)
+* [2] M. Zeier, J. Hoffmann, and M. Wollensack, “Metas.unclib–a measurement uncertainty calculator for advanced problems,” Metrologia, vol. 49, no. 6, pp. 809–815, nov 2012, doi: [10.1088/0026-1394/49/6/809](http://dx.doi.org/10.1088/0026-1394/49/6/809). METAS website: [https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html](https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html)
 
 * [3] Z. Hatab, M. Gadringer, and W. Bösch, "Propagation of Measurement and Model Uncertainties through Multiline TRL Calibration," 2022 Conference on Precision Electromagnetic Measurements (CPEM), Wellington, New Zealand, 2022, pp. 1-2, , doi: *I will update when available*. e-print: [https://arxiv.org/abs/2206.10209](https://arxiv.org/abs/2206.10209)
 
