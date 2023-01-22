@@ -92,17 +92,16 @@ def compute_G_with_takagi(A, metas=False):
         conj, exp, log, acosh, sqrt, \
             get_value, ucomplex = metas_or_numpy_funcs(metas=metas)
     if metas:
-        u,s = eig(A.dot(conj(A).T))
+        u,s = eig(dot(A,conj(A).T))
     else:
-        s,u = eig(A.dot(conj(A).T))
+        s,u = eig(dot(A,conj(A).T))
     s = sqrt(s).real  # singular values. They need to come as real positive floats
-    s = s*np.sign(get_value(s))
-    inx = np.flip(np.argsort(get_value(s))) # sort in increasing order
+    s = s*np.sign(get_value(s).real)
+    inx = np.flip(np.argsort(get_value(s).real)) # sort in increasing order
     lambd = s[inx][0]*s[inx][1]             # this is the eigenvalue of the calibration eigenvalue problem
     u = u[:,inx][:,:2]  # low-rank truncated (Eckart-Young-Mirsky theorem)
-    A = (A + A.T)/2  # only consider the symmetric part
-    phi = sqrt( conj(np.diag(u.T.dot(conj(A)).dot(u))) )
-    G = u.dot(np.diag(phi))
+    phi = sqrt(conj( np.diag(dot(dot(u.T,conj(A)),u)) ))
+    G = dot(u,np.diag(phi))
     return G, lambd
 
 def WLS(x,y,w=1, metas=False):
@@ -112,8 +111,8 @@ def WLS(x,y,w=1, metas=False):
             get_value, ucomplex = metas_or_numpy_funcs(metas=metas)
     x = x*(1+0j) # force x to be complex type 
     # return (x.conj().transpose().dot(w).dot(y))/(x.conj().transpose().dot(w).dot(x))
-    return dot(x.conj().transpose().dot(w), y)/dot(x.conj().transpose().dot(w), x)
-
+    # return dot(x.conj().transpose().dot(w), y)/dot(x.conj().transpose().dot(w), x)
+    return dot(conj(x.dot(w)), y)/dot(conj(x.dot(w)), x)
 def Vgl(N):
     # inverse covariance matrix for propagation constant computation
     return np.eye(N-1, dtype=complex) - (1/N)*np.ones(shape=(N-1, N-1), dtype=complex)
