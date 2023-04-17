@@ -161,7 +161,7 @@ if __name__=='__main__':
     tiks = [ (np.arange(0.2,0.241, 0.02), np.arange(0.04, 0.122, 0.04), np.arange(0,101,100)),
              (np.arange(-0.07, -0.049, 0.01), np.arange(-0.06, -0.039, 0.01), np.arange(0,201,200))]
     f_inx = 119
-    for tik, inx in zip(tiks,[(0,0),(1,0)]):
+    for tik, inx in zip(tiks,[(1,1),(0,1)]):
         x = L4S[:,f_inx,inx[0],inx[1]].real
         y = L4S[:,f_inx,inx[0],inx[1]].imag
         with PlotSettings(14):
@@ -169,15 +169,7 @@ if __name__=='__main__':
             fig.set_dpi(600)                   
             ax,axx,axy = plot_2d_hist(fig,x,y)
             ax.set_xlabel('Real')
-            ax.set_xlim(tik[0][[0,-1]])
-            ax.set_xticks(tik[0])
             ax.set_ylabel('Imaginary')
-            ax.set_ylim(tik[1][[0,-1]])
-            ax.set_yticks(tik[1])
-            axx.set_ylim(tik[2][[0,-1]])
-            axx.set_yticks(tik[2])
-            axy.set_xlim(tik[0][[0,-1]])
-            axy.set_xticks(tik[2])
         
             # Fit a normal distribution to the data:
             # x data
@@ -201,7 +193,7 @@ if __name__=='__main__':
             ax.legend(['Measured','Estimated'])
             plt.suptitle(f'Histogram of S{inx[0]+1}{inx[1]+1} at {f[f_inx]*1e-9:.0f}GHz', 
                  verticalalignment='bottom').set_y(0.94)
-            
+    
     # mTRL definition
     lines = [L1, L2, L3, L4, L5, L6]
     line_lengths = [200e-6, 450e-6, 900e-6, 1800e-6, 3500e-6, 5250e-6]
@@ -321,7 +313,7 @@ if __name__=='__main__':
     
         plt.suptitle(r"CPW parameters and calibrated DUT with 95% uncertainty bounds ($2\times\sigma$)", 
              verticalalignment='bottom').set_y(0.98)
-        
+    
     plt.show()
     
     # EOF

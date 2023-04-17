@@ -39,6 +39,8 @@ def metas_or_numpy_funcs(metas=False):
         log   = munc.umath.log
         acosh = munc.umath.acosh
         sqrt  = munc.umath.sqrt
+        real  = munc.umath.real
+        imag  = munc.umath.imag
         get_value = munc.get_value
         ucomplex  = munc.ucomplex
     else:
@@ -51,9 +53,11 @@ def metas_or_numpy_funcs(metas=False):
         log   = np.log
         acosh = np.arccosh
         sqrt  = np.sqrt
+        real  = np.real
+        imag  = np.imag
         get_value = lambda x: x
         ucomplex  = complex
-    return dot, inv, eig, solve, conj, exp, log, acosh, sqrt, get_value, ucomplex
+    return dot, inv, eig, solve, conj, exp, log, acosh, sqrt, real, imag, get_value, ucomplex
 
 def correct_switch_term(S, G21, G12):
     # correct switch terms of measured S-parameters at a single frequency point
@@ -66,38 +70,36 @@ def correct_switch_term(S, G21, G12):
     S_new[1,1] = (S[1,1]-S[0,1]*S[1,0]*G12)/(1-S[0,1]*S[1,0]*G21*G12)
     return S_new
 
-def S2T(S):
-    # convert S- to T-parameters at a single frequency point
+def s2t(S, pseudo=False):
     T = S.copy()
     T[0,0] = -(S[0,0]*S[1,1]-S[0,1]*S[1,0])
     T[0,1] = S[0,0]
     T[1,0] = -S[1,1]
     T[1,1] = 1
-    return T/S[1,0]
+    return T if pseudo else T/S[1,0]
 
-def T2S(T):
-    # convert T- to S-parameters at a single frequency point
+def t2s(T, pseudo=False):
     S = T.copy()
     S[0,0] = T[0,1]
     S[0,1] = T[0,0]*T[1,1]-T[0,1]*T[1,0]
     S[1,0] = 1
     S[1,1] = -T[1,0]
-    return S/T[1,1]
+    return S if pseudo else S/T[1,1]
 
 def compute_G_with_takagi(A, metas=False):
     # implementation of Takagi decomposition to compute the matrix G used to determine the weighting matrix.
     # Singular value decomposition for the Takagi factorization of symmetric matrices
     # https://www.sciencedirect.com/science/article/pii/S0096300314002239
     dot, inv, eig, solve, \
-        conj, exp, log, acosh, sqrt, \
+        conj, exp, log, acosh, sqrt, real, imag, \
             get_value, ucomplex = metas_or_numpy_funcs(metas=metas)
+    
     if metas:
         u,s = eig(dot(A,conj(A).T))
     else:
         s,u = eig(dot(A,conj(A).T))
-    s = sqrt(s).real  # singular values. They need to come as real positive floats
-    s = s*np.sign(get_value(s).real)
     inx = np.flip(np.argsort(get_value(s).real)) # sort in increasing order
+    s = sqrt(abs(s))  # singular values. They need to come as real positive floats
     lambd = s[inx][0]*s[inx][1]             # this is the eigenvalue of the calibration eigenvalue problem
     u = u[:,inx][:,:2]  # low-rank truncated (Eckart-Young-Mirsky theorem)
     phi = sqrt(conj( np.diag(dot(dot(u.T,conj(A)),u)) ))
@@ -107,34 +109,67 @@ def compute_G_with_takagi(A, metas=False):
 def WLS(x,y,w=1, metas=False):
     # Weighted least-squares for a single parameter estimation
     dot, inv, eig, solve, \
-        conj, exp, log, acosh, sqrt, \
+        conj, exp, log, acosh, sqrt, real, imag, \
             get_value, ucomplex = metas_or_numpy_funcs(metas=metas)
     x = x*(1+0j) # force x to be complex type 
-    # return (x.conj().transpose().dot(w).dot(y))/(x.conj().transpose().dot(w).dot(x))
-    # return dot(x.conj().transpose().dot(w), y)/dot(x.conj().transpose().dot(w), x)
     return dot(conj(x.dot(w)), y)/dot(conj(x.dot(w)), x)
+
 def Vgl(N):
     # inverse covariance matrix for propagation constant computation
     return np.eye(N-1, dtype=complex) - (1/N)*np.ones(shape=(N-1, N-1), dtype=complex)
 
-def compute_gamma(X_, M, lengths, gamma_est, metas=False):
-    # determine gamma after normalized calibration coefficients are solved
-    # gamma is determined through linear weighted least-squares
+def compute_gamma(X_inv, M, lengths, gamma_est, inx=0, metas=False):
+    # gamma = alpha + 1j*beta is determined through linear weighted least-squares
     dot, inv, eig, solve, \
-        conj, exp, log, acosh, sqrt, \
+        conj, exp, log, acosh, sqrt, real, imag, \
             get_value, ucomplex = metas_or_numpy_funcs(metas=metas)
+            
+    lengths = lengths - lengths[inx]
+    EX = dot(X_inv,M)[[0,-1],:]                  # extract z and y columns
+    EX = dot(np.diag(1/EX[:,inx]), EX)              # normalize to a reference line based on index `inx` (can be any)
     
-    EX = dot(inv(X_), M)[[0,-1],:]    # extract z and y columns
-    EX = dot(np.diag(1/EX[:,0]), EX)  # normalize to the thru line
-    gamma_l = log(EX[0,:]/EX[-1,:])
-    lengths = lengths - lengths[0]  # shift the uncertainties from first line 
-    gamma_l = gamma_l[get_value(lengths) != 0]
-    l = -2*lengths[get_value(lengths) != 0]
-    n = np.round(get_value(gamma_l - gamma_est*l).imag/np.pi/2)
-    gamma_l = gamma_l - 1j*2*np.pi*n # unwrapped
+    del_inx = np.arange(len(lengths)) != inx  # get rid of the reference line (i.e., thru)
     
-    return WLS(l, gamma_l, Vgl(len(l)+1))
+    # solve for alpha
+    l = -2*lengths[del_inx]
+    gamma_l = log(EX[0,:]/EX[-1,:])[del_inx]
+    alpha =  WLS(l, real(gamma_l), Vgl(len(l)+1))
+    
+    # solve for beta
+    l = -lengths[del_inx]
+    gamma_l = log((EX[0,:] + 1/EX[-1,:])/2)[del_inx]
+    n = np.round( get_value(gamma_l - gamma_est*l).imag/np.pi/2 )
+    gamma_l = gamma_l - 1j*2*np.pi*n # unwrap
+    beta = WLS(l, imag(gamma_l), Vgl(len(l)+1))
+    
+    return alpha + 1j*beta 
 
+def solve_quadratic(v1, v2, inx, x_est, metas=False):
+    dot, inv, eig, solve, \
+        conj, exp, log, acosh, sqrt, real, imag, \
+            get_value, ucomplex = metas_or_numpy_funcs(metas=metas)
+    # inx contain index of the unit value and product 
+    v12,v13 = v1[inx]
+    v22,v23 = v2[inx]
+    mask = np.ones(v1.shape, bool)
+    mask[inx] = False
+    v11,v14 = v1[mask]
+    v21,v24 = v2[mask]
+    if abs(get_value(v12))+abs(get_value(v23)) > abs(get_value(v22))+abs(get_value(v13)):  # to avoid dividing by small numbers
+        k2 = v11*v14*v22**2 + v12**2*v21*v24 - v12*v22*(v11*v24 + v14*v21)
+        k1 = -2*v11*v14*v22 - v12**2*v23 + v12*(v11*v24 + v13*v22 + v14*v21)
+        k0 = v11*v14 - v12*v13
+        c2 = np.array([(-k1 - sqrt(-4*k0*k2 + k1**2))/(2*k2), (-k1 + sqrt(-4*k0*k2 + k1**2))/(2*k2)])
+        c1 = (1 - c2*v22)/v12
+    else:
+        k2 = v11*v14*v22**2 + v12**2*v21*v24 - v12*v22*(v11*v24 + v14*v21)
+        k1 = -2*v12*v21*v24 - v13*v22**2 + v22*(v11*v24 + v12*v23 + v14*v21)
+        k0 = v21*v24 - v22*v23
+        c1 = np.array([(-k1 - sqrt(-4*k0*k2 + k1**2))/(2*k2), (-k1 + sqrt(-4*k0*k2 + k1**2))/(2*k2)])
+        c2 = (1 - c1*v12)/v22
+    x = np.array( [v1*x + v2*y for x,y in zip(c1,c2)] )  # 2 solutions
+    mininx = np.argmin( abs(get_value(x) - x_est).sum(axis=1) )
+    return x[mininx]
 
 def mTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est, f, sw=[0,0]):
     # Performing a standard mTRL without uncertainty.
@@ -148,7 +183,7 @@ def mTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est, f, sw=[0
     
     # numpy functions
     dot, inv, eig, solve, \
-        conj, exp, log, acosh, sqrt, \
+        conj, exp, log, acosh, sqrt, real, imag, \
             get_value, ucomplex = metas_or_numpy_funcs(metas=False)
         
     # correct switch term
@@ -159,7 +194,7 @@ def mTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est, f, sw=[0
     lengths = np.array([x-lengths[0] for x in lengths])
     
     # measurements
-    Mi    = [S2T(x) for x in Slines] # convert to T-parameters        
+    Mi    = [s2t(x) for x in Slines] # convert to T-parameters        
     M     = np.array([x.flatten('F') for x in Mi]).T
     MinvT = np.array([inv(x).flatten('F') for x in Mi])
           
@@ -169,53 +204,62 @@ def mTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est, f, sw=[0
     
     # estimated gamma to be used to resolve the sign of W
     gamma_est = 2*np.pi*f/c0*np.sqrt(-(ereff_est-1j*np.finfo(float).eps))  # the eps is to ensure positive square-root
-    gamma_est = gamma_est.real*np.sign(gamma_est.real) + 1j*gamma_est.imag # make sure to get the positive sign for losses
-    y_est = np.exp(gamma_est*get_value(lengths))
-    z_est = 1/y_est
-    if np.sign((y_est.dot(get_value(W)).dot(z_est)).real)-1:
-        W = -W # resolve the sign ambiguity
+    gamma_est = abs(gamma_est.real) + 1j*abs(gamma_est.imag)  # this to avoid sign inconsistencies 
+        
+    z_est = np.exp(-gamma_est*get_value(lengths))
+    y_est = 1/z_est
+    W_est = (np.outer(y_est,z_est) - np.outer(z_est,y_est)).conj()
+    W = -W if abs(get_value(W)-W_est).sum() > abs(get_value(W)+W_est).sum() else W # resolve the sign ambiguity
     
     ## Solving the weighted eigenvalue problem
-    F = M.dot(W).dot(MinvT[:,[0,2,1,3]]) # weighted measurements
-    eigval, eigvec = eig(F) # numpy order
-    inx = np.argsort(get_value(eigval.real)) # get indices of sorted eigenvalues
-    lambd = (eigval[inx[-1]] - eigval[inx[0]])/2   # lambda for debugging; over ride lambd from G (both should be the same)
+    F = dot(M,dot(W,MinvT[:,[0,2,1,3]]))  # weighted measurements
+    eigval, eigvec = eig(F+lambd*np.eye(4))
+    inx = np.argsort(abs(get_value(eigval)))
+    v1 = eigvec[:,inx[0]]
+    v2 = eigvec[:,inx[1]]
+    v3 = eigvec[:,inx[2]]
+    v4 = eigvec[:,inx[3]]
+    x1__est = get_value(v1/v1[0])
+    x1__est[-1] = x1__est[1]*x1__est[2]
+    x4_est = get_value(v4/v4[-1])
+    x4_est[0] = x4_est[1]*x4_est[2]
+    x2__est = np.array([x4_est[2], 1, x4_est[2]*x1__est[2], x1__est[2]])
+    x3__est = np.array([x4_est[1], x4_est[1]*x1__est[1], 1, x1__est[1]])
     
-    x1_ = eigvec[:,inx[0]]
-    x4  = eigvec[:,inx[-1]]
-    x1_ = x1_/x1_[0]
-    x1_[-1] = x1_[1]*x1_[2]   # to ensure kronecker product form
-    x4  = x4/x4[-1]
-    x4[0]  = x4[1]*x4[2]      # to ensure kronecker product form
-    x2_ = np.array([x4[2], ucomplex(1), x4[2]*x1_[2], x1_[2]])
-    x3_ = np.array([x4[1], x4[1]*x1_[1], ucomplex(1), x1_[1]])
+    # solve quadratic equation for each column
+    x1_ = solve_quadratic(v1, v4, [0,3], x1__est, metas=False)
+    x2_ = solve_quadratic(v2, v3, [1,2], x2__est, metas=False)
+    x3_ = solve_quadratic(v2, v3, [2,1], x3__est, metas=False)
+    x4  = solve_quadratic(v1, v4, [3,0], x4_est,  metas=False)
     
-    X_ = np.array([x1_, x2_, x3_, x4]).T  # normalized calibration matrix
+    # build the normalized cal coefficients (average the answers from range and null spaces)    
+    a12 = (x2_[0] + x4[2])/2
+    b21 = (x3_[0] + x4[1])/2
+    a21_a11 = (x1_[1] + x3_[3])/2
+    b12_b11 = (x1_[2] + x2_[3])/2
+    X_  = np.kron([[1,b21],[b12_b11,1]], [[1,a12],[a21_a11,1]])
+    
+    X_inv = inv(X_)
     
     ## Compute propagation constant
-    gamma = compute_gamma(X_, M, lengths, gamma_est, metas=False)
+    gamma = compute_gamma(X_inv, M, lengths, gamma_est, metas=False)
     ereff = -(c0/2/np.pi/f*gamma)**2
 
     ## De-normalization
     # solve for a11b11 and k from Thru measurement
-    ka11b11,_,_,k = solve(X_, M[:,0])
-    #ka11b11,_,_,k = inv(X_).dot(M[:,0])
-    a11b11  = ka11b11/k
-    
-    # solve for a11/b11, a11 and b11
-    Ga = Sreflect[0,0]
-    Gb = Sreflect[1,1]
-    a11_b11 = (Ga - x2_[0])/(1 - Ga*x3_[3])*(1 + Gb*x2_[3])/(Gb + x3_[0])
+    ka11b11,_,_,k = dot(X_inv, M[:,0]).squeeze()
+    a11b11 = ka11b11/k
+
+    T  = dot(X_inv, s2t(Sreflect, pseudo=True).flatten('F') ).squeeze()
+    a11_b11 = -T[2]/T[1]
     a11 = sqrt(a11_b11*a11b11)
-    # choose correct answer for a11 and b11
-    G0 = get_value( (Ga - x2_[0])/(1 - Ga*x3_[3])/a11 )
-    if abs(G0 - get_value(reflect_est)) > abs(-G0 - get_value(reflect_est)):
-        a11 = -a11
     b11 = a11b11/a11
-    
-    reflect_est_a = (Ga - x2_[0])/(1 - Ga*x3_[3])/a11  # new reflection value from port A
-    reflect_est_b = (Gb + x3_[0])/(1 + Gb*x2_[3])/b11  # new reflection value from port B
-    reflect_est = (reflect_est_a + reflect_est_b)/2    # average as new estimate
+    G_cal = ( (Sreflect[0,0] - a12)/(1 - Sreflect[0,0]*a21_a11)/a11 + (Sreflect[1,1] + b21)/(1 + Sreflect[1,1]*b12_b11)/b11 )/2  # average
+    if abs(get_value(G_cal - reflect_est)) > abs(get_value(G_cal + reflect_est)):
+        a11 = -a11
+        b11 = -b11
+        G_cal = -G_cal
+    reflect_est = G_cal
     
     # build the calibration matrix (de-normalize)
     X  = dot( X_, np.diag([a11b11, b11, a11, ucomplex(1)]) )
@@ -225,7 +269,7 @@ def mTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est, f, sw=[0
 def cov_ereff_Gamma(ereff_Gamma, lengths, X, k, f):
     # determine covariance of ereff_Gamma (line mismatch)
     dot, inv, eig, solve, \
-        conj, exp, log, acosh, sqrt, \
+        conj, exp, log, acosh, sqrt, real, imag, \
             get_value, ucomplex = metas_or_numpy_funcs(metas=True)
     
     ereff = ereff_Gamma[:,0]
@@ -260,7 +304,7 @@ def umTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est, f, X, k
     
     # metas functions
     dot, inv, eig, solve, \
-        conj, exp, log, acosh, sqrt, \
+        conj, exp, log, acosh, sqrt, real, imag, \
             get_value, ucomplex = metas_or_numpy_funcs(metas=True)
     
     if uSlines is not None:
@@ -279,13 +323,11 @@ def umTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est, f, X, k
         Sreflect = munc.ucomplexarray(Sreflect, covariance=np.zeros((8,8)), desc='S_reflect')
     
     if ureflect is not None:
-        reflect_est_both = munc.ucomplexarray([reflect_est, reflect_est], covariance=np.kron(np.eye(2), ureflect), desc='Reflect_est')
-        reflect_est_a = reflect_est_both[0]
-        reflect_est_b = reflect_est_both[1]
+        reflect_est_a = munc.ucomplex( reflect_est, covariance=ureflect )
+        reflect_est_b = munc.ucomplex( reflect_est, covariance=ureflect )
+        reflect_ratio = munc.ucomplex( 1+0j, covariance=munc.get_covariance(reflect_est_b/reflect_est_a) , desc='Reflect_ratio')
     else:
-        reflect_est_both = munc.ucomplexarray([reflect_est, reflect_est], covariance=np.zeros((4,4)), desc='Reflect_est')
-        reflect_est_a = reflect_est_both[0]
-        reflect_est_b = reflect_est_both[1]
+        reflect_ratio = munc.ucomplex( 1+0j, covariance=np.zeros((2,2)) , desc='Reflect_ratio')
         
     if uereff_Gamma is not None:
         ereff_Gamma = np.array([munc.ucomplexarray([ereff_est, 0], covariance=covx, desc=f'Mismatch_line_{inx+1}') for inx,covx in enumerate(uereff_Gamma)])
@@ -299,7 +341,7 @@ def umTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est, f, X, k
         sww = sw # just to use as a check
         sw = munc.ucomplexarray(sw, covariance=np.zeros((4,4)), desc='switch_terms')
     
-    par_package = (Slines, lengths, Sreflect, reflect_est_both, ereff_Gamma, sw)  # this to be provided later to extract individuall uncertaintities
+    par_package = (Slines, lengths, Sreflect, reflect_ratio, ereff_Gamma, sw)  # this to be provided later to extract individuall uncertaintities
     
     # correct switch term
     Slines = [correct_switch_term(x,sw[0],sw[1]) for x in Slines] if np.any(sww) else Slines
@@ -309,66 +351,76 @@ def umTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est, f, X, k
     lengths = np.array([x-get_value(lengths[0]) for x in lengths])
     
     # measurements
-    Mi = [S2T(x) for x in Slines] # convert to T-paramters
+    Mi = [s2t(x) for x in Slines] # convert to T-paramters
     M  = np.array([x.flatten('F') for x in Mi]).T     # all line measurements
     M  = M + cov_ereff_Gamma(ereff_Gamma, get_value(lengths), X, k, f)  # update covariance with line mismatch
     MinvT = np.array([inv(x.reshape((2,2),order='F')).flatten('F') for x in M.T])  # inverse line measurements
     
-    ## compute W from Takagi factorization
+    ## Compute W from Takagi factorization
     G, lambd = compute_G_with_takagi(dot(MinvT,M[[0,2,1,3]]), metas=True)
     q = munc.ucomplexarray([[0,1j],[-1j,0]], np.zeros((8,8)))
     W = conj(dot(dot(G,q),G.T))
-
+    
     # estimated gamma to be used to resolve the sign of W
     gamma_est = 2*np.pi*f/c0*np.sqrt(-(ereff_est-1j*np.finfo(float).eps))  # the eps is to ensure positive square-root
-    gamma_est = gamma_est.real*np.sign(get_value(gamma_est.real)) + 1j*gamma_est.imag # make sure to get the correct sign for losses
-    y_est = np.exp(gamma_est*get_value(lengths))
-    z_est = 1/y_est
-    if np.sign((y_est.dot(get_value(W)).dot(z_est)).real)-1:
-        W = -W # resolve the sign ambiguity
+    gamma_est = abs(gamma_est.real) + 1j*abs(gamma_est.imag)  # this to avoid sign inconsistencies 
+        
+    z_est = np.exp(-gamma_est*get_value(lengths))
+    y_est = 1/z_est
+    W_est = (np.outer(y_est,z_est) - np.outer(z_est,y_est)).conj()
+    W = -W if abs(get_value(W)-W_est).sum() > abs(get_value(W)+W_est).sum() else W # resolve the sign ambiguity
     
     ## Solving the weighted eigenvalue problem
-    F = dot(dot(M,W), MinvT[:,[0,2,1,3]]) # weighted measurements
-    eigvec, eigval = eig(F) # metas order
-    inx = np.argsort(get_value(eigval.real)) # get indices of sorted eigenvalues
-    lambd = (eigval[inx[-1]] - eigval[inx[0]])/2   # lambda for debugging; over ride lambd from G (both should be the same)
+    F = dot(M,dot(W,MinvT[:,[0,2,1,3]]))     # weighted measurements
+    eigvec, eigval = eig(F+get_value(lambd)*np.eye(4)) # metas order
+    inx = np.argsort(abs(get_value(eigval)))
+    v1 = eigvec[:,inx[0]]
+    v2 = eigvec[:,inx[1]]
+    v3 = eigvec[:,inx[2]]
+    v4 = eigvec[:,inx[3]]
+    x1__est = get_value(v1/v1[0])
+    x1__est[-1] = x1__est[1]*x1__est[2]
+    x4_est = get_value(v4/v4[-1])
+    x4_est[0] = x4_est[1]*x4_est[2]
+    x2__est = np.array([x4_est[2], 1, x4_est[2]*x1__est[2], x1__est[2]])
+    x3__est = np.array([x4_est[1], x4_est[1]*x1__est[1], 1, x1__est[1]])
     
-    x1_ = eigvec[:,inx[0]]
-    x4  = eigvec[:,inx[-1]]
-    x1_ = x1_/x1_[0]
-    x1_[-1] = x1_[1]*x1_[2]
-    x4  = x4/x4[-1]
-    x4[0]  = x4[1]*x4[2]
-    x2_ = np.array([x4[2], ucomplex(1), x4[2]*x1_[2], x1_[2]])
-    x3_ = np.array([x4[1], x4[1]*x1_[1], ucomplex(1), x1_[1]])
+    # solve quadratic equation for each column
+    x1_ = solve_quadratic(v1, v4, [0,3], x1__est, metas=True)
+    x2_ = solve_quadratic(v2, v3, [1,2], x2__est, metas=True)
+    x3_ = solve_quadratic(v2, v3, [2,1], x3__est, metas=True)
+    x4  = solve_quadratic(v1, v4, [3,0], x4_est,  metas=True)
     
-    X_ = np.array([x1_, x2_, x3_, x4]).T  # normalized calibration matrix
+    # build the normalized cal coefficients (average the answers from range and null spaces)    
+    a12 = (x2_[0] + x4[2])/2
+    b21 = (x3_[0] + x4[1])/2
+    a21_a11 = (x1_[1] + x3_[3])/2
+    b12_b11 = (x1_[2] + x2_[3])/2
+    X_  = np.kron([[1,b21],[b12_b11,1]], [[1,a12],[a21_a11,1]])
     
-    ## Compute progataion constant
-    gamma = compute_gamma(X_, M, lengths, gamma_est, metas=True)
+    X_inv = inv(X_)
+    
+    ## Compute propagation constant
+    gamma = compute_gamma(X_inv, M, lengths, gamma_est, metas=True)
     ereff = -(c0/2/np.pi/f*gamma)**2
-    
+
     ## De-normalization
     # solve for a11b11 and k from Thru measurement
-    ka11b11,_,_,k = solve(X_, M[:,0])
-    # ka11b11,_,_,k = dot(inv(X_), M[:,0]).squeeze()
-    a11b11  = ka11b11/k
+    ka11b11,_,_,k = dot(X_inv, M[:,0]).squeeze()
+    a11b11 = ka11b11/k
     a11b11  = a11b11*exp(-2*gamma*lengths[0]) # to propagate length uncertainty through plane offset
     k       = k/exp(gamma*lengths[0])         # to propagate length uncertainty through plane offset
-    
-    # solve for a11/b11, a11 and b11
-    Ga = Sreflect[0,0]
-    Gb = Sreflect[1,1]
-    a11_b11 = (reflect_est_b/reflect_est_a)*(Ga - x2_[0])/(1 - Ga*x3_[3])*(1 + Gb*x2_[3])/(Gb + x3_[0])
+
+    T  = dot(X_inv, s2t(Sreflect, pseudo=True).flatten('F') ).squeeze()
+    a11_b11 = -T[2]/T[1]*reflect_ratio
     a11 = sqrt(a11_b11*a11b11)
-    # choose correct answer for a11 and b11
-    G0 = get_value( (Ga - x2_[0])/(1 - Ga*x3_[3])/a11 )
-    if abs(G0 - get_value(reflect_est_a)) > abs(-G0 - get_value(reflect_est_a)):
-        a11 = -a11
     b11 = a11b11/a11
-    reflect_est_a = (Ga - x2_[0])/(1 - Ga*x3_[3])/a11  # new value
-    reflect_est_b = (Gb + x3_[0])/(1 + Gb*x2_[3])/b11  # new value
-    reflect_est = (reflect_est_a + reflect_est_b)/2    # average as new estimate
+    G_cal = ( (Sreflect[0,0] - a12)/(1 - Sreflect[0,0]*a21_a11)/a11 + (Sreflect[1,1] + b21)/(1 + Sreflect[1,1]*b12_b11)/b11 )/2  # average
+    if abs(get_value(G_cal - reflect_est)) > abs(get_value(G_cal + reflect_est)):
+        a11 = -a11
+        b11 = -b11
+        G_cal = -G_cal
+    reflect_est = G_cal
     
     # build the calibration matrix (de-normalize)
     X  = dot(X_, np.diag([a11b11, b11, a11, ucomplex(1)]) )
@@ -505,7 +557,7 @@ class umTRL:
         lengths_metas  = []
         Sreflect_metas = []
         sw_metas       = []
-        reflect_est_metas = []
+        reflect_ratio_metas = []
         ereff_Gamma_metas   = []
         
         ereff0  = self.ereff[0]
@@ -552,7 +604,7 @@ class umTRL:
             Slines_metas.append(par_tuple[0])
             lengths_metas.append(par_tuple[1])
             Sreflect_metas.append(par_tuple[2])
-            reflect_est_metas.append(par_tuple[3])
+            reflect_ratio_metas.append(par_tuple[3])
             ereff_Gamma_metas.append(par_tuple[4])
             sw_metas.append(par_tuple[5])
             print(f'Frequency: {f*1e-9:0.2f} GHz ... DONE!')
@@ -560,7 +612,7 @@ class umTRL:
         self.Slines_metas   = np.array(Slines_metas)
         self.lengths_metas  = np.array(lengths_metas)
         self.Sreflect_metas = np.array(Sreflect_metas)
-        self.reflect_est_metas = np.array(reflect_est_metas)
+        self.reflect_ratio_metas = np.array(reflect_ratio_metas)
         self.ereff_Gamma_metas   = np.array(ereff_Gamma_metas)
         self.sw_metas   = np.array(sw_metas)
         
@@ -673,7 +725,7 @@ class umTRL:
         
         # numpy or metas functions
         dot, inv, eig, solve, \
-            conj, exp, log, acosh, sqrt, \
+            conj, exp, log, acosh, sqrt, real, imag, \
                 get_value, ucomplex = metas_or_numpy_funcs(metas=metas)
         
         # apply cal
@@ -713,7 +765,7 @@ class umTRL:
         metas = True if isinstance(self.k[0], type(munc.ucomplex(0))) else False
         # numpy or metas functions
         dot, inv, eig, solve, \
-            conj, exp, log, acosh, sqrt, \
+            conj, exp, log, acosh, sqrt, real, imag, \
                 get_value, ucomplex = metas_or_numpy_funcs(metas=metas)
         X_new = []
         K_new = []
@@ -735,7 +787,7 @@ class umTRL:
         metas = True if isinstance(self.k[0], type(munc.ucomplex(0))) else False
         # numpy or metas functions
         dot, inv, eig, solve, \
-            conj, exp, log, acosh, sqrt, \
+            conj, exp, log, acosh, sqrt, real, imag, \
                 get_value, ucomplex = metas_or_numpy_funcs(metas=metas)
         
         # ensure correct array dimensions (if not, you get an error!)

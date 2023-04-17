@@ -249,7 +249,7 @@ if __name__=='__main__':
     sig_std = sig*0.1
 
     # Monte Carlo simulation 
-    M = 100 # number of MC runs
+    M = 3 # number of MC runs
     cpw_MC = copy.deepcopy(cpw)
     loss_dbmm_mTRL_model_MC = []
     ereff_real_mTRL_model_MC = []
