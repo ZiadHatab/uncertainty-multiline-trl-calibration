@@ -709,7 +709,7 @@ class umTRL:
         return self.coefs
     
     
-    def apply_cal(self, NW, left=True):
+    def apply_cal(self, NW, cov=None, left=True):
         # apply calibration to a 1-port or 2-port network.
         # NW:   the network to be calibrated (1- or 2-port).
         # left: boolean: define which port to use when 1-port network is given.
@@ -722,7 +722,9 @@ class umTRL:
             NW = rf.two_port_reflect(NW)
         
         metas = True if isinstance(self.k[0], type(munc.ucomplex(0))) else False
-        
+        cov   = np.nan*self.f if cov is None else cov
+        metas = True if cov is not None else metas  # override if cov is given
+
         # numpy or metas functions
         dot, inv, eig, solve, \
             conj, exp, log, acosh, sqrt, real, imag, \
@@ -730,13 +732,11 @@ class umTRL:
         
         # apply cal
         S_cal = []
-        for x,k,s,sw in zip(self.X, self.k, NW.s, self.switch_term.T):
-            s    = correct_switch_term(s, sw[0], sw[1]) if np.any(sw) else s
+        for x,k,s,sw,c in zip(self.X, self.k, NW.s, self.switch_term.T, cov):
+            s = s if np.all(np.isnan(c)) else munc.ucomplexarray(s, covariance=c)
+            s = correct_switch_term(s, sw[0], sw[1]) if np.any(sw) else s
             xinv = inv(x)
-            s11 = ucomplex(complex(s[0,0]))
-            s21 = ucomplex(complex(s[1,0]))
-            s12 = ucomplex(complex(s[0,1]))
-            s22 = ucomplex(complex(s[1,1]))
+            s11,s21,s12,s22 = s[0,0],s[1,0],s[0,1],s[1,1]
             M_ = np.array([-s11*s22+s12*s21, -s22, s11, 1])
             T_ = dot(xinv, M_)
             s21_cal = k*s21/T_[-1]
