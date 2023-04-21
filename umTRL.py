@@ -744,7 +744,7 @@ class umTRL:
             scal = np.array([[T_[2], (T_[0]-T_[2]*T_[1])/s21_cal],[s21_cal, -T_[1]]])
             S_cal.append(scal)
             
-        S_cal = np.array(S_cal)
+        S_cal = np.array(S_cal).squeeze()
         
         # revert to 1-port device if the input was a 1-port device
         if nports < 2:
