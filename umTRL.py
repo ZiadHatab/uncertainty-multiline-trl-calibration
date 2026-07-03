@@ -1,78 +1,70 @@
 """
 @author: Ziad Hatab (zi.hatab@gmail.com)
 
-This is an implementation of the multiline TRL calibration algorithm with linear 
-uncertainty propagation capabilities. This is an extension of my original 
-mTRL algorithm [1] to account for uncertainties. To simplify the implementation I included 
-METAS UncLib [2]. Summery details can be found here: https://arxiv.org/abs/2206.10209
+Multiline TRL calibration with linear uncertainty propagation, hence "u"mTRL.
 
-Developed at:
-    Institute of Microwave and Photonic Engineering,
-    Graz University of Technology (TU Graz), Austria
+Uncertainty-enabled version of my TUG mTRL algorithm [1-4] (plain implementation:
+https://github.com/ZiadHatab/multiline-trl-calibration). mTRL_at_one_freq is numpy;
+umTRL_at_one_freq is the same algorithm through METAS UncLib [5] to propagate covariances of
+S-parameter noise, line length, reflect asymmetry, line mismatch and switch terms.
 
-[1] Z. Hatab, M. Gadringer, and W. B¨osch, 
-"Improving the reliability of the multiline trl calibration algorithm," 
-in 98th ARFTG Microwave Measurement Conference, Las Vegas, NV, USA, 2022.
-
-[2] M. Zeier, J. Hoffmann, and M. Wollensack, 
-"Metas.UncLib—a measurement uncertainty calculator for advanced problems," 
-Metrologia, vol. 49, no. 6, pp. 809–815, nov 2012.
+[1] Z. Hatab, M. Gadringer and W. Bösch, "Improving The Reliability of The Multiline TRL
+    Calibration Algorithm," 98th ARFTG Conf., 2022, doi: 10.1109/ARFTG52954.2022.9844064.
+[2] Z. Hatab, M. E. Gadringer and W. Bösch, "Propagation of Linear Uncertainties through
+    Multiline TRL Calibration," IEEE TIM, vol. 72, 2023, doi: 10.1109/TIM.2023.3296123.
+[3] Z. Hatab, M. E. Gadringer and W. Bösch, "A Thru-Free Multiline Calibration," IEEE TIM,
+    vol. 72, 2023, doi: 10.1109/TIM.2023.3308226.
+[4] Z. Hatab, M. E. Gadringer and W. Bösch, "The Choice of Line Lengths in Multiline
+    Thru-Reflect-Line Calibration," IEEE TIM, vol. 75, 2026, doi: 10.1109/TIM.2026.3704158.
+[5] M. Zeier, J. Hoffmann and M. Wollensack, "Metas.UncLib," Metrologia, vol. 49, 2012,
+    doi: 10.1088/0026-1394/49/6/809.
 """
 
-# pip install numpy scikit-rf metas_unclib -U
+# python -m pip install numpy scikit-rf metas_unclib -U
 import numpy as np
 import skrf as rf
 import metas_unclib as munc
 munc.use_linprop()
 
-c0 = 299792458   # speed of light in vacuum (m/s)
+c0 = 299792458.0   # speed of light in vacuum (m/s)
 
 def metas_or_numpy_funcs(metas=False):
-    # this is my way to switch between metas and numpy functions
+    # my way to switch between metas and numpy functions
     if metas:
         dot   = munc.ulinalg.dot
         inv   = munc.ulinalg.inv
         eig   = munc.ulinalg.eig
-        solve = munc.ulinalg.solve
         conj  = munc.umath.conj
         exp   = munc.umath.exp
         log   = munc.umath.log
-        acosh = munc.umath.acosh
         sqrt  = munc.umath.sqrt
-        real  = munc.umath.real
-        imag  = munc.umath.imag
         get_value = munc.get_value
         ucomplex  = munc.ucomplex
     else:
         dot   = np.dot
         inv   = np.linalg.inv
         eig   = np.linalg.eig
-        solve = np.linalg.solve
         conj  = np.conj
         exp   = np.exp
         log   = np.log
-        acosh = np.arccosh
         sqrt  = np.sqrt
-        real  = np.real
-        imag  = np.imag
         get_value = lambda x: x
         ucomplex  = complex
-    return dot, inv, eig, solve, conj, exp, log, acosh, sqrt, real, imag, get_value, ucomplex
+    return dot, inv, eig, conj, exp, log, sqrt, get_value, ucomplex
 
-def correct_switch_term(S, G21, G12):
-    # correct switch terms of measured S-parameters at a single frequency point
-    # G21: forward (sourced by port-1)
-    # G12: reverse (sourced by port-2)
-    S_new = S.copy()
-    S_new[0,0] = (S[0,0]-S[0,1]*S[1,0]*G21)/(1-S[0,1]*S[1,0]*G21*G12)
-    S_new[0,1] = (S[0,1]-S[0,0]*S[0,1]*G12)/(1-S[0,1]*S[1,0]*G21*G12)
-    S_new[1,0] = (S[1,0]-S[1,1]*S[1,0]*G21)/(1-S[0,1]*S[1,0]*G21*G12)
-    S_new[1,1] = (S[1,1]-S[0,1]*S[1,0]*G12)/(1-S[0,1]*S[1,0]*G21*G12)
-    return S_new
+def correct_switch_term(S, GF, GR):
+    # remove switch-term effect from measured S-parameters (GF: forward, GR: reverse)
+    Sn = S.copy()
+    d = 1 - S[0,1]*S[1,0]*GF*GR
+    Sn[0,0] = (S[0,0] - S[0,1]*S[1,0]*GF)/d
+    Sn[0,1] = (S[0,1] - S[0,0]*S[0,1]*GR)/d
+    Sn[1,0] = (S[1,0] - S[1,1]*S[1,0]*GF)/d
+    Sn[1,1] = (S[1,1] - S[0,1]*S[1,0]*GR)/d
+    return Sn
 
 def s2t(S, pseudo=False):
     T = S.copy()
-    T[0,0] = -(S[0,0]*S[1,1]-S[0,1]*S[1,0])
+    T[0,0] = -(S[0,0]*S[1,1] - S[0,1]*S[1,0])
     T[0,1] = S[0,0]
     T[1,0] = -S[1,1]
     T[1,1] = 1
@@ -81,729 +73,609 @@ def s2t(S, pseudo=False):
 def t2s(T, pseudo=False):
     S = T.copy()
     S[0,0] = T[0,1]
-    S[0,1] = T[0,0]*T[1,1]-T[0,1]*T[1,0]
+    S[0,1] = T[0,0]*T[1,1] - T[0,1]*T[1,0]
     S[1,0] = 1
     S[1,1] = -T[1,0]
     return S if pseudo else S/T[1,1]
 
-def compute_G_with_takagi(A, metas=False):
-    # implementation of Takagi decomposition to compute the matrix G used to determine the weighting matrix.
-    # Singular value decomposition for the Takagi factorization of symmetric matrices
-    # https://www.sciencedirect.com/science/article/pii/S0096300314002239
-    dot, inv, eig, solve, \
-        conj, exp, log, acosh, sqrt, real, imag, \
-            get_value, ucomplex = metas_or_numpy_funcs(metas=metas)
-    
-    if metas:
-        u,s = eig(dot(A,conj(A).T))
-    else:
-        s,u = eig(dot(A,conj(A).T))
-    inx = np.flip(np.argsort(get_value(s).real)) # sort in increasing order
-    s = sqrt(abs(s))  # singular values. They need to come as real positive floats
-    lambd = s[inx][0]*s[inx][1]             # this is the eigenvalue of the calibration eigenvalue problem
-    u = u[:,inx][:,:2]  # low-rank truncated (Eckart-Young-Mirsky theorem)
-    phi = sqrt(conj( np.diag(dot(dot(u.T,conj(A)),u)) ))
-    G = dot(u,np.diag(phi))
-    return G, lambd
+def sqrt_unwrapped(z):
+    # square root of a complex array with its phase unwrapped across frequency
+    return np.sqrt(abs(z))*np.exp(0.5j*np.unwrap(np.angle(z)))
 
-def WLS(x,y,w=1, metas=False):
-    # Weighted least-squares for a single parameter estimation
-    dot, inv, eig, solve, \
-        conj, exp, log, acosh, sqrt, real, imag, \
-            get_value, ucomplex = metas_or_numpy_funcs(metas=metas)
-    x = x*(1+0j) # force x to be complex type 
-    return dot(conj(x.dot(w)), y)/dot(conj(x.dot(w)), x)
+def error_matrix(A, B, inv):
+    # 16-term error matrix from 2x2 blocks A and P2 inv(B) P2; the P/P2 permutations are
+    # done by re-indexing (faster than matrix products in metas).
+    E = np.zeros((4,4), dtype=object if np.asarray(A).dtype == object else complex)
+    E[:2,:2] = A
+    E[2:,2:] = inv(B)[::-1][:,::-1]     # P2 @ inv(B) @ P2
+    return E[[0,2,1,3]][:,[0,2,1,3]]    # P.T @ E @ P
+
+def LFTinv(E, S, dot, inv):
+    # inverse linear fractional transformation (de-embedding), see Speciale (1981)
+    E11, E12, E21, E22 = E[:2,:2], E[:2,2:], E[2:,:2], E[2:,2:]
+    return dot(inv(dot(S, E21) - E11), E12 - dot(S, E22))
+
+def compute_G_with_takagi(A, metas=False):
+    # Takagi factorization of complex-symmetric A via eig(A A^H) = U diag(s^2) U^H
+    # https://www.sciencedirect.com/science/article/pii/S0096300314002239
+    dot, inv, eig, conj, exp, log, sqrt, get_value, ucomplex = metas_or_numpy_funcs(metas)
+    if metas:
+        u, s = eig(dot(A, conj(A).T))   # metas eig returns (vectors, values); numpy the reverse
+    else:
+        s, u = eig(dot(A, conj(A).T))
+    sv  = np.sqrt(np.abs(get_value(s)))  # singular values, nominal (lambd is only used nominally)
+    inx = np.flip(np.argsort(sv))
+    lambd = sv[inx[0]]*sv[inx[1]]
+    u = u[:, inx][:, :2]                 # low-rank truncation (Eckart-Young)
+    phi = sqrt(conj(np.diag(dot(dot(u.T, conj(A)), u))))
+    return dot(u, np.diag(phi)), lambd
+
+def rank1_recover(R, metas=False):
+    # dominant left singular vector u1 and its projection u1^H @ R, via eig(R R^H)
+    dot, inv, eig, conj, exp, log, sqrt, get_value, ucomplex = metas_or_numpy_funcs(metas)
+    if metas:
+        u, s = eig(dot(R, conj(R).T))
+    else:
+        s, u = eig(dot(R, conj(R).T))
+    u1 = u[:, np.argmax(abs(get_value(s)))]
+    return u1, conj(u1).dot(R)
+
+def WLS(x, y, w=1, metas=False):
+    # weighted least-squares for a single complex parameter
+    dot, inv, eig, conj, exp, log, sqrt, get_value, ucomplex = metas_or_numpy_funcs(metas)
+    x = x*(1+0j)
+    xw = conj(x.dot(w))
+    return xw.dot(y)/xw.dot(x)
 
 def Vgl(N):
-    # inverse covariance matrix for propagation constant computation
-    return np.eye(N-1, dtype=complex) - (1/N)*np.ones(shape=(N-1, N-1), dtype=complex)
+    # inverse covariance matrix for the propagation-constant fit
+    return np.eye(N-1, dtype=complex) - (1/N)*np.ones((N-1, N-1), dtype=complex)
 
-def compute_gamma(X_inv, M, lengths, gamma_est, inx=0, metas=False):
-    # gamma = alpha + 1j*beta is determined through linear weighted least-squares
-    dot, inv, eig, solve, \
-        conj, exp, log, acosh, sqrt, real, imag, \
-            get_value, ucomplex = metas_or_numpy_funcs(metas=metas)
-            
+def compute_gamma(z, lengths, gamma_est, metas=False, inx=None):
+    # gamma = alpha + 1j*beta from z = exp(-gamma*length) by weighted least-squares.
+    # reference line inx minimizes the largest baseline (best phase-unwrap margin).
+    dot, inv, eig, conj, exp, log, sqrt, get_value, ucomplex = metas_or_numpy_funcs(metas)
+    lv = get_value(lengths)
+    if inx is None:
+        inx = np.argmin([abs(lv - l).max() for l in lv])
     lengths = lengths - lengths[inx]
-    EX = dot(X_inv,M)[[0,-1],:]                  # extract z and y columns
-    EX = dot(np.diag(1/EX[:,inx]), EX)              # normalize to a reference line based on index `inx` (can be any)
-    
-    del_inx = np.arange(len(lengths)) != inx  # get rid of the reference line (i.e., thru)
-    
-    # solve for alpha
-    l = -2*lengths[del_inx]
-    gamma_l = log(EX[0,:]/EX[-1,:])[del_inx]
-    alpha =  WLS(l, real(gamma_l), Vgl(len(l)+1))
-    
-    # solve for beta
-    l = -lengths[del_inx]
-    gamma_l = log((EX[0,:] + 1/EX[-1,:])/2)[del_inx]
-    n = np.round( get_value(gamma_l - gamma_est*l).imag/np.pi/2 )
-    gamma_l = gamma_l - 1j*2*np.pi*n # unwrap
-    beta = WLS(l, imag(gamma_l), Vgl(len(l)+1))
-    
-    return alpha + 1j*beta 
+    z = z/z[inx]
+    keep = np.arange(len(lv)) != inx  # exclude the reference line from the fit
+    l = -lengths[keep]
+    gamma_l = log(z[keep])
+    n = np.round((get_value(gamma_l) - gamma_est*get_value(l)).imag/np.pi/2)   # unwrap
+    gamma_l = gamma_l - 1j*2*np.pi*n
+    gamma = WLS(l, gamma_l, Vgl(int(keep.sum()) + 1), metas)
+    return conj(gamma) if get_value(gamma).imag < 0 else gamma   # positive delay (causality)
+
+def compute_lambd(gamma, lengths):
+    # squared Frobenius norm of the ideal weighting matrix (used to rank the two gammas)
+    z = np.exp(-gamma*lengths)
+    W = (np.outer(1/z, z) - np.outer(z, 1/z)).conj()
+    return abs(W.conj()*W).sum()/2
 
 def solve_quadratic(v1, v2, inx, x_est, metas=False):
-    dot, inv, eig, solve, \
-        conj, exp, log, acosh, sqrt, real, imag, \
-            get_value, ucomplex = metas_or_numpy_funcs(metas=metas)
-    # inx contain index of the unit value and product 
-    v12,v13 = v1[inx]
-    v22,v23 = v2[inx]
+    # recover a calibration column as c1*v1 + c2*v2 by solving the induced quadratic
+    dot, inv, eig, conj, exp, log, sqrt, get_value, ucomplex = metas_or_numpy_funcs(metas)
+    v12, v13 = v1[inx]
+    v22, v23 = v2[inx]
     mask = np.ones(v1.shape, bool)
     mask[inx] = False
-    v11,v14 = v1[mask]
-    v21,v24 = v2[mask]
-    if abs(get_value(v12))+abs(get_value(v23)) > abs(get_value(v22))+abs(get_value(v13)):  # to avoid dividing by small numbers
-        k2 = v11*v14*v22**2 + v12**2*v21*v24 - v12*v22*(v11*v24 + v14*v21)
+    v11, v14 = v1[mask]
+    v21, v24 = v2[mask]
+    k2 = v11*v14*v22**2 + v12**2*v21*v24 - v12*v22*(v11*v24 + v14*v21)
+    if abs(get_value(v12)) > abs(get_value(v22)):   # avoid dividing by small numbers
         k1 = -2*v11*v14*v22 - v12**2*v23 + v12*(v11*v24 + v13*v22 + v14*v21)
         k0 = v11*v14 - v12*v13
-        c2 = np.array([(-k1 - sqrt(-4*k0*k2 + k1**2))/(2*k2), (-k1 + sqrt(-4*k0*k2 + k1**2))/(2*k2)])
+        c2 = np.array([(-k1 - sqrt(k1**2 - 4*k0*k2))/(2*k2), (-k1 + sqrt(k1**2 - 4*k0*k2))/(2*k2)])
         c1 = (1 - c2*v22)/v12
     else:
-        k2 = v11*v14*v22**2 + v12**2*v21*v24 - v12*v22*(v11*v24 + v14*v21)
         k1 = -2*v12*v21*v24 - v13*v22**2 + v22*(v11*v24 + v12*v23 + v14*v21)
         k0 = v21*v24 - v22*v23
-        c1 = np.array([(-k1 - sqrt(-4*k0*k2 + k1**2))/(2*k2), (-k1 + sqrt(-4*k0*k2 + k1**2))/(2*k2)])
+        c1 = np.array([(-k1 - sqrt(k1**2 - 4*k0*k2))/(2*k2), (-k1 + sqrt(k1**2 - 4*k0*k2))/(2*k2)])
         c2 = (1 - c1*v12)/v22
-    x = np.array( [v1*x + v2*y for x,y in zip(c1,c2)] )  # 2 solutions
-    mininx = np.argmin( abs(get_value(x) - x_est).sum(axis=1) )
-    return x[mininx]
-
-def mTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est, f, sw=[0,0]):
-    # Performing a standard mTRL without uncertainty.
-    # Slines: array containing 2x2 S-parameters of each line standard
-    # lengths: array containing the lengths of the lines
-    # Sreflect: 2x2 S-parameters of the measured reflect standard
-    # ereff_est: complex scalar of estimated effective permittivity
-    # reflect_est: complex scalar of estimated reflection coefficient of the reflect standard
-    # f: scalar, current frequency point
-    # sw: 1x2 array holding the forward and reverse switch terms, respectively.
-    
-    # numpy functions
-    dot, inv, eig, solve, \
-        conj, exp, log, acosh, sqrt, real, imag, \
-            get_value, ucomplex = metas_or_numpy_funcs(metas=False)
-        
-    # correct switch term
-    Slines = [correct_switch_term(x,sw[0],sw[1]) for x in Slines] if np.any(sw) else Slines
-    Sreflect = correct_switch_term(Sreflect,sw[0],sw[1]) if np.any(sw) else Sreflect # this is actually not needed!
-    
-    # make first line as Thru, i.e., zero length
-    lengths = np.array([x-lengths[0] for x in lengths])
-    
-    # measurements
-    Mi    = [s2t(x) for x in Slines] # convert to T-parameters        
-    M     = np.array([x.flatten('F') for x in Mi]).T
-    MinvT = np.array([inv(x).flatten('F') for x in Mi])
-          
-    ## Compute W from Takagi factorization
-    G, lambd = compute_G_with_takagi(MinvT.dot(M[[0,2,1,3]]), metas=False)
-    W = conj((G@np.array([[0,1j],[-1j,0]])).dot(G.T))
-    
-    # estimated gamma to be used to resolve the sign of W
-    gamma_est = 2*np.pi*f/c0*np.sqrt(-(ereff_est-1j*np.finfo(float).eps))  # the eps is to ensure positive square-root
-    gamma_est = abs(gamma_est.real) + 1j*abs(gamma_est.imag)  # this to avoid sign inconsistencies 
-        
-    z_est = np.exp(-gamma_est*get_value(lengths))
-    y_est = 1/z_est
-    W_est = (np.outer(y_est,z_est) - np.outer(z_est,y_est)).conj()
-    W = -W if abs(get_value(W)-W_est).sum() > abs(get_value(W)+W_est).sum() else W # resolve the sign ambiguity
-    
-    ## Solving the weighted eigenvalue problem
-    F = dot(M,dot(W,MinvT[:,[0,2,1,3]]))  # weighted measurements
-    eigval, eigvec = eig(F+lambd*np.eye(4))
-    inx = np.argsort(abs(get_value(eigval)))
-    v1 = eigvec[:,inx[0]]
-    v2 = eigvec[:,inx[1]]
-    v3 = eigvec[:,inx[2]]
-    v4 = eigvec[:,inx[3]]
-    x1__est = get_value(v1/v1[0])
-    x1__est[-1] = x1__est[1]*x1__est[2]
-    x4_est = get_value(v4/v4[-1])
-    x4_est[0] = x4_est[1]*x4_est[2]
-    x2__est = np.array([x4_est[2], 1, x4_est[2]*x1__est[2], x1__est[2]])
-    x3__est = np.array([x4_est[1], x4_est[1]*x1__est[1], 1, x1__est[1]])
-    
-    # solve quadratic equation for each column
-    x1_ = solve_quadratic(v1, v4, [0,3], x1__est, metas=False)
-    x2_ = solve_quadratic(v2, v3, [1,2], x2__est, metas=False)
-    x3_ = solve_quadratic(v2, v3, [2,1], x3__est, metas=False)
-    x4  = solve_quadratic(v1, v4, [3,0], x4_est,  metas=False)
-    
-    # build the normalized cal coefficients (average the answers from range and null spaces)    
-    a12 = (x2_[0] + x4[2])/2
-    b21 = (x3_[0] + x4[1])/2
-    a21_a11 = (x1_[1] + x3_[3])/2
-    b12_b11 = (x1_[2] + x2_[3])/2
-    X_  = np.kron([[1,b21],[b12_b11,1]], [[1,a12],[a21_a11,1]])
-    
-    X_inv = inv(X_)
-    
-    ## Compute propagation constant
-    gamma = compute_gamma(X_inv, M, lengths, gamma_est, metas=False)
-    ereff = -(c0/2/np.pi/f*gamma)**2
-
-    ## De-normalization
-    # solve for a11b11 and k from Thru measurement
-    ka11b11,_,_,k = dot(X_inv, M[:,0]).squeeze()
-    a11b11 = ka11b11/k
-
-    T  = dot(X_inv, s2t(Sreflect, pseudo=True).flatten('F') ).squeeze()
-    a11_b11 = -T[2]/T[1]
-    a11 = sqrt(a11_b11*a11b11)
-    b11 = a11b11/a11
-    G_cal = ( (Sreflect[0,0] - a12)/(1 - Sreflect[0,0]*a21_a11)/a11 + (Sreflect[1,1] + b21)/(1 + Sreflect[1,1]*b12_b11)/b11 )/2  # average
-    if abs(get_value(G_cal - reflect_est)) > abs(get_value(G_cal + reflect_est)):
-        a11 = -a11
-        b11 = -b11
-        G_cal = -G_cal
-    reflect_est = G_cal
-    
-    # build the calibration matrix (de-normalize)
-    X  = dot( X_, np.diag([a11b11, b11, a11, ucomplex(1)]) )
-    
-    return X, k, get_value(ereff), gamma, get_value(reflect_est), lambd
+    x = np.array([v1*a + v2*b for a, b in zip(c1, c2)])   # 2 candidate solutions
+    return x[np.argmin(abs(get_value(x) - x_est).sum(axis=1))]
 
 def cov_ereff_Gamma(ereff_Gamma, lengths, X, k, f):
-    # determine covariance of ereff_Gamma (line mismatch)
-    dot, inv, eig, solve, \
-        conj, exp, log, acosh, sqrt, real, imag, \
-            get_value, ucomplex = metas_or_numpy_funcs(metas=True)
-    
-    ereff = ereff_Gamma[:,0]
-    gamma = 2*np.pi*f/c0*sqrt(-ereff)
-    GG = ereff_Gamma[:,1]
-    Rkron = lambda G: [[1/(1 - G**2), G/(1 - G**2), -G/(1 - G**2), -G**2/(1 - G**2)],
-                      [G/(1 - G**2), 1/(1 - G**2), -G**2/(1 - G**2), -G/(1 - G**2)],
-                      [-G/(1 - G**2), -G**2/(1 - G**2), 1/(1 - G**2), G/(1 - G**2)], 
-                      [-G**2/(1 - G**2), -G/(1 - G**2), G/(1 - G**2), 1/(1 - G**2)]]
-    
-    Mprime = np.array( [(k*X@dot(Rkron(G), [exp(-g*l),0,0,exp(g*l)])).squeeze() for l,g,G in zip(lengths,gamma,GG)] ).T
-    return Mprime - get_value(Mprime)  # make it zero-mean distributed
+    # zero-mean perturbation of the line T-parameters M due to line mismatch (ereff, Gamma).
+    # X, k are the nominal error-box coefficients (numpy) from the standard mTRL run.
+    dot, inv, eig, conj, exp, log, sqrt, get_value, ucomplex = metas_or_numpy_funcs(metas=True)
+    def Rkron(G):
+        d = 1 - G**2
+        return np.array([[1/d,     G/d,     -G/d,     -G**2/d],
+                         [G/d,     1/d,     -G**2/d,  -G/d],
+                         [-G/d,    -G**2/d, 1/d,      G/d],
+                         [-G**2/d, -G/d,    G/d,      1/d]])
+    cols = []
+    for eg, l in zip(ereff_Gamma, lengths):
+        g = 2*np.pi*f/c0*sqrt(-eg[0])
+        t = np.array([exp(-g*l), ucomplex(0), ucomplex(0), exp(g*l)])
+        cols.append(k*X.dot(Rkron(eg[1])).dot(t))
+    Mprime = np.array(cols).T
+    return Mprime - get_value(Mprime)
 
-def umTRL_at_one_freq(Slines, lengths, Sreflect, ereff_est, reflect_est, f, X, k, sw=[0,0],
-                      uSlines=None, ulengths=None, uSreflect=None, ureflect=None, uereff_Gamma=None, usw=None):
-    # Slines: array containing 2x2 S-parameters of each line standard
-    # lengths: array containing the lengths of the lines
-    # Sreflect: 2x2 S-parameters of the measured reflect standard
-    # ereff_est: complex scalar of estimated effective permittivity
-    # reflect_est: complex scalar of estimated reflection coefficient of the reflect standard
-    # f: scalar, current frequency point
-    # sw: 1x2 array holding the forward and reverse switch terms, respectively.
-    # X: 4x4 array estimated calibration coefficients
-    # k: scalar of estimated 7th term calibration coefficient
-    #
-    # uSlines: array containing the 8x8 covariance of each line measurement
-    # ulengths: array containing the variance of each line
-    # uSreflect: 8x8 covariance matrix of measured reflect 
-    # ureflect: 2x2 covariance matrix of the reflection coefficient of the reflect standard
-    # uereff_Gamma: 4x4 covariance matrix of the line mismatch.
-    # usw: 4x4 covariance matrix of switch terms
-    
-    # metas functions
-    dot, inv, eig, solve, \
-        conj, exp, log, acosh, sqrt, real, imag, \
-            get_value, ucomplex = metas_or_numpy_funcs(metas=True)
-    
-    if uSlines is not None:
-        Slines   = np.array([munc.ucomplexarray(x, covariance=covx, desc=f'S_line_{inx+1}') for inx,(x,covx) in enumerate(zip(Slines,uSlines))]) 
-    else:
-        Slines   = np.array([munc.ucomplexarray(x, covariance=np.zeros((8,8)), desc=f'S_line_{inx+1}') for inx,x in enumerate(Slines)]) 
-    
-    if ulengths is not None:
-        lengths  = munc.ufloatarray(lengths, covariance=ulengths, desc='line_lengths')
-    else:
-        lengths  = munc.ufloatarray(lengths, covariance=np.zeros((len(lengths),len(lengths))), desc='line_lengths')
-    
-    if uSreflect is not None:
-        Sreflect = munc.ucomplexarray(Sreflect, covariance=uSreflect, desc='S_reflect')
-    else:
-        Sreflect = munc.ucomplexarray(Sreflect, covariance=np.zeros((8,8)), desc='S_reflect')
-    
-    if ureflect is not None:
-        reflect_est_a = munc.ucomplex( reflect_est, covariance=ureflect )
-        reflect_est_b = munc.ucomplex( reflect_est, covariance=ureflect )
-        reflect_ratio = munc.ucomplex( 1+0j, covariance=munc.get_covariance(reflect_est_b/reflect_est_a) , desc='Reflect_ratio')
-    else:
-        reflect_ratio = munc.ucomplex( 1+0j, covariance=np.zeros((2,2)) , desc='Reflect_ratio')
-        
-    if uereff_Gamma is not None:
-        ereff_Gamma = np.array([munc.ucomplexarray([ereff_est, 0], covariance=covx, desc=f'Mismatch_line_{inx+1}') for inx,covx in enumerate(uereff_Gamma)])
-    else:
-        ereff_Gamma = np.array([munc.ucomplexarray([ereff_est, 0], covariance=np.zeros((4,4)), desc=f'Mismatch_line_{inx+1}') for inx,x in enumerate(uereff_Gamma)])
-    
-    if usw is not None:
-        sww = sw # just to use as a check
-        sw = munc.ucomplexarray(sw, covariance=usw, desc='switch_terms')
-    else:
-        sww = sw # just to use as a check
-        sw = munc.ucomplexarray(sw, covariance=np.zeros((4,4)), desc='switch_terms')
-    
-    par_package = (Slines, lengths, Sreflect, reflect_ratio, ereff_Gamma, sw)  # this to be provided later to extract individuall uncertaintities
-    
-    # correct switch term
-    Slines = [correct_switch_term(x,sw[0],sw[1]) for x in Slines] if np.any(sww) else Slines
-    Sreflect = correct_switch_term(Sreflect,sw[0],sw[1]) if np.any(sww) else Sreflect # this is actually not needed!
-    
-    # make first line as Thru, i.e., zero length
-    lengths = np.array([x-get_value(lengths[0]) for x in lengths])
-    
-    # measurements
-    Mi = [s2t(x) for x in Slines] # convert to T-paramters
-    M  = np.array([x.flatten('F') for x in Mi]).T     # all line measurements
-    M  = M + cov_ereff_Gamma(ereff_Gamma, get_value(lengths), X, k, f)  # update covariance with line mismatch
-    MinvT = np.array([inv(x.reshape((2,2),order='F')).flatten('F') for x in M.T])  # inverse line measurements
-    
-    ## Compute W from Takagi factorization
-    G, lambd = compute_G_with_takagi(dot(MinvT,M[[0,2,1,3]]), metas=True)
-    q = munc.ucomplexarray([[0,1j],[-1j,0]], np.zeros((8,8)))
-    W = conj(dot(dot(G,q),G.T))
-    
-    # estimated gamma to be used to resolve the sign of W
-    gamma_est = 2*np.pi*f/c0*np.sqrt(-(ereff_est-1j*np.finfo(float).eps))  # the eps is to ensure positive square-root
-    gamma_est = abs(gamma_est.real) + 1j*abs(gamma_est.imag)  # this to avoid sign inconsistencies 
-        
-    z_est = np.exp(-gamma_est*get_value(lengths))
-    y_est = 1/z_est
-    W_est = (np.outer(y_est,z_est) - np.outer(z_est,y_est)).conj()
-    W = -W if abs(get_value(W)-W_est).sum() > abs(get_value(W)+W_est).sum() else W # resolve the sign ambiguity
-    
-    ## Solving the weighted eigenvalue problem
-    F = dot(M,dot(W,MinvT[:,[0,2,1,3]]))     # weighted measurements
-    eigvec, eigval = eig(F+get_value(lambd)*np.eye(4)) # metas order
-    inx = np.argsort(abs(get_value(eigval)))
-    v1 = eigvec[:,inx[0]]
-    v2 = eigvec[:,inx[1]]
-    v3 = eigvec[:,inx[2]]
-    v4 = eigvec[:,inx[3]]
-    x1__est = get_value(v1/v1[0])
-    x1__est[-1] = x1__est[1]*x1__est[2]
-    x4_est = get_value(v4/v4[-1])
-    x4_est[0] = x4_est[1]*x4_est[2]
+def mTRL_at_one_freq(Slines, lengths, Sreflect, gamma_est, reflect_est, reflect_offset,
+                     sw=[0,0], compensate_repeated_lines=False, lnorm=1):
+    """
+    Standard mTRL at a single frequency (no uncertainties, plain numpy).
+
+    Slines         : list of 2x2 line S-parameters (first line is the Thru)
+    lengths        : 1D array of line lengths
+    Sreflect       : list of 2x2 reflect S-parameters (may be several; nan-filled if none)
+    gamma_est      : estimated propagation constant (seeds the sign and phase unwrap)
+    reflect_est    : 1D array of reference reflection coefficients (one per reflect)
+    reflect_offset : 1D array of reflect offsets relative to the Thru (one per reflect)
+    sw             : [forward, reverse] switch terms
+    compensate_repeated_lines : True to down-weight repeated lengths in the eigenvalue problem
+    lnorm          : 1 for Frobenius norm, 2 for spectral norm (eigenvalue problem scaling)
+    """
+    reflect_est, reflect_offset = np.atleast_1d(reflect_est), np.atleast_1d(reflect_offset)
+    has_reflect = not np.isnan(Sreflect[0][0,0])
+
+    # switch-term correction
+    if np.any(sw):
+        Slines = [correct_switch_term(x, sw[0], sw[1]) for x in Slines]
+        if has_reflect:
+            Sreflect = [correct_switch_term(x, sw[0], sw[1]) for x in Sreflect]
+
+    lengths = np.array(lengths) - lengths[0]   # Thru is the reference
+
+    # line T-parameters and their inverses
+    Mi    = [s2t(x) for x in Slines]
+    M     = np.array([x.flatten('F') for x in Mi]).T
+    MinvT = np.array([np.linalg.inv(x).flatten('F') for x in Mi])
+
+    # weighting matrix W from the Takagi factorization (index reorder instead of P@Q)
+    G, lambd = compute_G_with_takagi(MinvT@M[[0,2,1,3]])
+    W = (G@np.array([[0,1j],[-1j,0]])@G.T).conj()
+
+    # z = exp(-gamma*length) from G, with the sign of W resolved against gamma_est
+    eigval, eigvec = np.linalg.eig(G@np.array([[1,-1j],[1j,1]])@G.T)
+    z = eigvec[:, np.argmax(abs(eigval))]
+    z_est = np.exp(-gamma_est*lengths)
+    lambd_est = (1/z_est)@W@z_est
+    if abs(lambd_est - lambd) > abs(lambd_est + lambd):
+        W, z = -W, 1/z
+
+    # scale W: S1 down-weights repeated lengths, S2 sets the eigenvalue-problem norm [4]
+    # (each defaults to identity, so either applies independently).
+    _, ui, counts = np.unique(lengths, return_inverse=True, return_counts=True)
+    S1 = np.outer(1/counts[ui], 1/counts[ui]) if compensate_repeated_lines else 1
+    S2 = abs(W)**(lnorm - 1)
+    WS = W*(S1*S2)
+    lambd_S = 0.5*abs(WS.conj()*W).sum()   # eigenvalue and its normalization after scaling
+    kappa_S = 2*lambd_S/abs(WS).sum()
+
+    # weighted eigenvalue problem -> normalized error terms
+    eigval, eigvec = np.linalg.eig(M@WS@MinvT[:,[0,2,1,3]])
+    v1, v2, v3, v4 = eigvec[:, np.argsort(eigval.real)].T   # eigenvalues [-lambda,0,0,+lambda]
+
+    x1__est = v1/v1[0]; x1__est[-1] = x1__est[1]*x1__est[2]
+    x4_est  = v4/v4[-1]; x4_est[0]  = x4_est[1]*x4_est[2]
     x2__est = np.array([x4_est[2], 1, x4_est[2]*x1__est[2], x1__est[2]])
     x3__est = np.array([x4_est[1], x4_est[1]*x1__est[1], 1, x1__est[1]])
+    x1_ = solve_quadratic(v1, v4, [0,3], x1__est)
+    x2_ = solve_quadratic(v2, v3, [1,2], x2__est)
+    x3_ = solve_quadratic(v2, v3, [2,1], x3__est)
+    x4  = solve_quadratic(v1, v4, [3,0], x4_est)
+
+    # build the normalized error boxes (average of range- and null-space answers)
+    a12, b21 = (x2_[0] + x4[2])/2, (x3_[0] + x4[1])/2
+    a21_a11, b12_b11 = (x1_[1] + x3_[3])/2, (x1_[2] + x2_[3])/2
+    A_ = np.array([[1, a12], [a21_a11, 1]])
+    B_ = np.array([[1, b12_b11], [b21, 1]])
+    X_ = np.kron(B_.T, A_)
+    E_ = error_matrix(A_, B_, np.linalg.inv)
+
+    # de-embed the lines and recover s21 = exp(-gamma*length) by rank-1 recovery
+    Slines_cal = np.array([LFTinv(E_, s, np.dot, np.linalg.inv) for s in Slines])
+    R = np.array([Slines_cal[:,1,0], Slines_cal[:,0,1]])
+    _, vh1 = rank1_recover(R)
+    s21 = vh1/vh1[0]
+
+    # gamma from the lines (returned to the user) and gamma1 from G (seed for the next point)
+    gamma  = compute_gamma(s21, lengths, gamma_est)
+    gamma1 = compute_gamma(z,   lengths, gamma_est)
+    if abs(compute_lambd(gamma, lengths) - lambd) < abs(compute_lambd(gamma1, lengths) - lambd):
+        gamma1 = gamma
+
+    # Thru normalization using S-parameters [3]
+    k = 1/Slines_cal[0][1,0]
+    a11b11 = Slines_cal[0][0,1]/k
+
+    # solve a11, b11 from the reflect(s); rank-1 recovery combines multiple reflects
+    if not has_reflect:
+        a11 = b11 = np.sqrt(a11b11)
+    else:
+        Sreflect_cal = np.array([LFTinv(E_, s, np.dot, np.linalg.inv) for s in Sreflect])
+        u1, _ = rank1_recover(np.array([Sreflect_cal[:,0,0], Sreflect_cal[:,1,1]]))
+        a11 = np.sqrt(u1[0]/u1[1]*a11b11)
+        b11 = a11b11/a11
+        G_cal = (Sreflect_cal[:,0,0]/a11 + Sreflect_cal[:,1,1]/b11)/2
+        reo = reflect_est*np.exp(-2*gamma1*reflect_offset)
+        if abs(G_cal + reo).sum() < abs(G_cal - reo).sum():
+            G_cal, a11, b11 = -G_cal, -a11, -b11
+        reflect_est = G_cal*np.exp(2*gamma1*reflect_offset)
+
+    X = X_@np.diag([a11b11, b11, a11, 1])
+    return X, k, gamma, gamma1, reflect_est, lambd_S, kappa_S
+
+
+def umTRL_at_one_freq(Slines, lengths, Sreflect, gamma_est, reflect_est, reflect_offset, f, X, k,
+                      sw=[0,0], compensate_repeated_lines=False, lnorm=1,
+                      uSlines=None, ulengths=None, uSreflect=None, ureflect=None,
+                      uereff_Gamma=None, usw=None):
+    """
+    Same as mTRL_at_one_freq but with linear uncertainty propagation via METAS UncLib.
+    X, k are the nominal error-box coefficients (from mTRL_at_one_freq) needed for the
+    line-mismatch covariance. The u* arguments are per-frequency covariance matrices.
+    Returns an extra par_package with the METAS input variables (for uncertainty budgets).
+    """
+    dot, inv, eig, conj, exp, log, sqrt, get_value, ucomplex = metas_or_numpy_funcs(metas=True)
+    reflect_est    = np.atleast_1d(reflect_est)
+    reflect_offset = np.atleast_1d(reflect_offset)
+    n = len(Slines)
+    has_reflect = not np.isnan(get_value(Sreflect[0][0,0]))
+    ereff_est = -(c0*gamma_est/(2*np.pi*f))**2   # nominal line permittivity for the mismatch model
+
+    # wrap the inputs as METAS variables carrying their covariance
+    Slines = np.array([munc.ucomplexarray(s, covariance=c, desc=f'S_line_{j+1}')
+                       for j, (s, c) in enumerate(zip(Slines, uSlines))])
+    lengths = munc.ufloatarray(lengths, covariance=ulengths, desc='line_lengths')
+    ereff_Gamma = np.array([munc.ucomplexarray([ereff_est, 0], covariance=c, desc=f'mismatch_line_{j+1}')
+                            for j, c in enumerate(uereff_Gamma)])
+    sw_m = munc.ucomplexarray(sw, covariance=usw, desc='switch_terms')
+    if has_reflect:
+        Sreflect = np.array([munc.ucomplexarray(s, covariance=c, desc=f'S_reflect_{j+1}')
+                             for j, (s, c) in enumerate(zip(Sreflect, uSreflect))])
+        ra = munc.ucomplex(reflect_est[0], covariance=ureflect)
+        rb = munc.ucomplex(reflect_est[0], covariance=ureflect)
+        reflect_ratio = munc.ucomplex(1+0j, covariance=munc.get_covariance(rb/ra), desc='reflect_ratio')
+    else:
+        reflect_ratio = 1
+    par_package = (Slines, lengths, Sreflect, reflect_ratio, ereff_Gamma, sw_m)
+
+    # switch-term correction
+    if np.any(sw):
+        Slines = [correct_switch_term(x, sw_m[0], sw_m[1]) for x in Slines]
+        if has_reflect:
+            Sreflect = [correct_switch_term(x, sw_m[0], sw_m[1]) for x in Sreflect]
+
+    lengths = lengths - lengths[0]   # Thru is the reference
+    lv = get_value(lengths)
+
+    # line T-parameters (perturbed by the line-mismatch covariance) and their inverses
+    M = np.array([s2t(x).flatten('F') for x in Slines]).T
+    M = M + cov_ereff_Gamma(ereff_Gamma, lv, X, k, f)
+    Mi    = [M[:, i].reshape((2,2), order='F') for i in range(n)]
+    MinvT = np.array([inv(x).flatten('F') for x in Mi])
+    Seff  = [t2s(x) for x in Mi]   # S-parameters carrying the same perturbation
+
+    # weighting matrix W from the Takagi factorization (index reorder instead of P@Q)
+    G, lambd = compute_G_with_takagi(dot(MinvT, M[[0,2,1,3]]), metas=True)
+    W = conj(dot(dot(G, np.array([[0,1j],[-1j,0]])), G.T))
+
+    # z (= exp(-gamma*length) from G) and the W-sign check only feed the nominal estimate
+    # gamma1 below, so use nominal G/W here to avoid pointless auto-diff.
+    Gv, Wv = get_value(G), get_value(W)
+    eigval, eigvec = np.linalg.eig(Gv@np.array([[1,-1j],[1j,1]])@Gv.T)
+    z = eigvec[:, np.argmax(abs(eigval))]
+    z_est = np.exp(-gamma_est*lv)
+    lambd_est = (1/z_est)@Wv@z_est
+    if abs(lambd_est - lambd) > abs(lambd_est + lambd):
+        W, z = -W, 1/z
     
-    # solve quadratic equation for each column
+    # scale W: S1 down-weights repeated lengths, S2 sets the eigenvalue-problem norm [4]
+    # (each defaults to identity, so either applies independently).
+    _, ui, counts = np.unique(lv, return_inverse=True, return_counts=True)
+    S1 = np.outer(1/counts[ui], 1/counts[ui]) if compensate_repeated_lines else 1
+    S2 = abs(W)**(lnorm - 1)
+    WS  = W*(S1*S2)
+    lambd_S = 0.5*abs(WS.conj()*W).sum()   # eigenvalue and its normalization after scaling
+    kappa_S = 2*lambd_S/abs(WS).sum()
+
+    # weighted eigenvalue problem -> normalized error terms
+    F = dot(M, dot(WS, MinvT[:, [0,2,1,3]]))
+    eigvec, eigval = eig(F)
+    v1, v2, v3, v4 = [eigvec[:, i] for i in np.argsort(get_value(eigval).real)]
+
+    x1__est = get_value(v1/v1[0]); x1__est[-1] = x1__est[1]*x1__est[2]
+    x4_est  = get_value(v4/v4[-1]); x4_est[0]  = x4_est[1]*x4_est[2]
+    x2__est = np.array([x4_est[2], 1, x4_est[2]*x1__est[2], x1__est[2]])
+    x3__est = np.array([x4_est[1], x4_est[1]*x1__est[1], 1, x1__est[1]])
     x1_ = solve_quadratic(v1, v4, [0,3], x1__est, metas=True)
     x2_ = solve_quadratic(v2, v3, [1,2], x2__est, metas=True)
     x3_ = solve_quadratic(v2, v3, [2,1], x3__est, metas=True)
     x4  = solve_quadratic(v1, v4, [3,0], x4_est,  metas=True)
-    
-    # build the normalized cal coefficients (average the answers from range and null spaces)    
-    a12 = (x2_[0] + x4[2])/2
-    b21 = (x3_[0] + x4[1])/2
-    a21_a11 = (x1_[1] + x3_[3])/2
-    b12_b11 = (x1_[2] + x2_[3])/2
-    X_  = np.kron([[1,b21],[b12_b11,1]], [[1,a12],[a21_a11,1]])
-    
-    X_inv = inv(X_)
-    
-    ## Compute propagation constant
-    gamma = compute_gamma(X_inv, M, lengths, gamma_est, metas=True)
-    ereff = -(c0/2/np.pi/f*gamma)**2
 
-    ## De-normalization
-    # solve for a11b11 and k from Thru measurement
-    ka11b11,_,_,k = dot(X_inv, M[:,0]).squeeze()
-    a11b11 = ka11b11/k
-    a11b11  = a11b11*exp(-2*gamma*lengths[0]) # to propagate length uncertainty through plane offset
-    k       = k/exp(gamma*lengths[0])         # to propagate length uncertainty through plane offset
+    # build the normalized error boxes (average of range- and null-space answers)
+    a12, b21 = (x2_[0] + x4[2])/2, (x3_[0] + x4[1])/2
+    a21_a11, b12_b11 = (x1_[1] + x3_[3])/2, (x1_[2] + x2_[3])/2
+    A_ = np.array([[1, a12], [a21_a11, 1]])
+    B_ = np.array([[1, b12_b11], [b21, 1]])
+    X_ = np.kron(B_.T, A_)
+    E_ = error_matrix(A_, B_, inv)
 
-    T  = dot(X_inv, s2t(Sreflect, pseudo=True).flatten('F') ).squeeze()
-    a11_b11 = -T[2]/T[1]*reflect_ratio
-    a11 = sqrt(a11_b11*a11b11)
-    b11 = a11b11/a11
-    G_cal = ( (Sreflect[0,0] - a12)/(1 - Sreflect[0,0]*a21_a11)/a11 + (Sreflect[1,1] + b21)/(1 + Sreflect[1,1]*b12_b11)/b11 )/2  # average
-    if abs(get_value(G_cal - reflect_est)) > abs(get_value(G_cal + reflect_est)):
-        a11 = -a11
-        b11 = -b11
-        G_cal = -G_cal
-    reflect_est = G_cal
-    
-    # build the calibration matrix (de-normalize)
-    X  = dot(X_, np.diag([a11b11, b11, a11, ucomplex(1)]) )
-        
-    return X, k, get_value(ereff), gamma, get_value(reflect_est), lambd, par_package
+    # de-embed the lines and recover s21 = exp(-gamma*length) by rank-1 recovery
+    Slines_cal = [LFTinv(E_, s, dot, inv) for s in Seff]
+    R = np.array([[sc[1,0] for sc in Slines_cal], [sc[0,1] for sc in Slines_cal]])
+    _, vh1 = rank1_recover(R, metas=True)
+    s21 = vh1/vh1[0]
+
+    # gamma from the de-embedded lines: the only gamma with uncertainty, returned to the user
+    gamma  = compute_gamma(s21, lengths, gamma_est, metas=True)
+    # gamma1 from G is a nominal estimate, used to resolve the reflect sign and seed the next
+    # point, so keep it numpy
+    gamma1 = compute_gamma(z, lv, gamma_est)
+    if abs(compute_lambd(get_value(gamma), lv) - lambd) < abs(compute_lambd(gamma1, lv) - lambd):
+        gamma1 = get_value(gamma)
+
+    # Thru normalization using S-parameters [3].
+    k = 1/Slines_cal[0][1,0]
+    a11b11 = Slines_cal[0][0,1]/k
+    a11b11 = a11b11*exp(-2*gamma*lengths[0])
+    k = k/exp(gamma*lengths[0])
+
+    # solve a11, b11 from the reflect(s); rank-1 recovery combines multiple reflects
+    if not has_reflect:
+        a11 = b11 = sqrt(a11b11)
+    else:
+        Sreflect_cal = [LFTinv(E_, s, dot, inv) for s in Sreflect]
+        u1, _ = rank1_recover(np.array([[sc[0,0] for sc in Sreflect_cal],
+                                        [sc[1,1] for sc in Sreflect_cal]]), metas=True)
+        a11 = sqrt(u1[0]/u1[1]*reflect_ratio*a11b11)
+        b11 = a11b11/a11
+        G_cal = np.array([(sc[0,0]/a11 + sc[1,1]/b11)/2 for sc in Sreflect_cal])
+        reo = reflect_est*np.exp(-2*gamma1*reflect_offset)
+        if abs(get_value(G_cal) + reo).sum() < abs(get_value(G_cal) - reo).sum():
+            G_cal, a11, b11 = -G_cal, -a11, -b11
+        reflect_est = get_value(G_cal)*np.exp(2*gamma1*reflect_offset)
+
+    X = dot(X_, np.diag([a11b11, b11, a11, ucomplex(1)]))
+    return X, k, gamma, gamma1, reflect_est, lambd_S, kappa_S, par_package
 
 def convert2cov(x, num_f, cov_length=2):
-    '''
-    make input into covariance matrix
-    num_f is the number of frequeny points
-    cov_length is the final diagonal length of the cov matrix
-    
-    Three cases are considerd:
-        1. the input is a scalar variance --> convert to diagonal with same variance --> repeat along frequency axes
-        2. the input is a vector variance --> only diagonalize it --> repeat along frequency axes
-        3. the input is 2D matrix --> do nothing --> repeat along frequency axes
-        4. the input is 3D array --> do nothing --> do nothing (assuming the user knows what he/she is doing!)
-    '''
-    num_f   = int(num_f)
-    cov_length = int(cov_length)
+    """
+    Expand a user-supplied uncertainty into a (num_f, cov_length, cov_length) covariance:
+        scalar variance -> scaled identity, repeated over frequency
+        1D variances    -> diagonal, repeated over frequency
+        2D covariance    -> repeated over frequency
+        3D array         -> used as-is (already frequency-dependent)
+    """
+    num_f, cov_length = int(num_f), int(cov_length)
     x = np.atleast_1d(x)
-    
-    if len(x.shape) > 1:
-        if len(x.shape) > 2:
-            cov = x  # assume everything is fine
-        else:
-            cov = np.tile(x, (num_f,1,1))
-    else:
-        if x.shape[0] > 1:
-            cov = np.tile(np.diag(x), (num_f,1,1))
-        else:
-            cov = np.tile(np.eye(cov_length)*x[0], (num_f,1,1))
-    
-    return cov
+    if x.ndim > 2:
+        return x
+    if x.ndim == 2:
+        return np.tile(x, (num_f, 1, 1))
+    if x.shape[0] > 1:
+        return np.tile(np.diag(x), (num_f, 1, 1))
+    return np.tile(np.eye(cov_length)*x[0], (num_f, 1, 1))
+
+def per_standard(u, n):
+    # normalize an uncertainty spec into a list of n covariance specs (one per standard)
+    if u is None:
+        return [0.0]*n
+    arr = np.asarray(u)
+    if arr.ndim >= 3 and arr.shape[0] == n:
+        return [arr[i] for i in range(n)]
+    return [arr]*n
 
 class umTRL:
-    """
-    
-    Multiline TRL calibration with uncertainty capabilities, hence "u"mTRL.
-    
-    """
-    
-    def __init__(self, lines, line_lengths, reflect, 
-                 reflect_est=-1, reflect_offset=0, ereff_est=1+0j, switch_term=None,
-                 uSlines=None, ulengths=None, uSreflect=None, ureflect=None, uereff_Gamma=None, uswitch_term=None):
-        """
-        umTRL initializer.
-        """
+    """Multiline TRL calibration with linear uncertainty propagation."""
 
-        self.f  = lines[0].frequency.f
-        self.Slines = np.array([x.s for x in lines])
+    def __init__(self, lines, line_lengths, reflect=None,
+                 reflect_est=-1, reflect_offset=0, ereff_est=1+0j, switch_term=None,
+                 compensate_repeated_lines=False, lnorm=1,
+                 uSlines=None, ulengths=None, uSreflect=None, ureflect=None,
+                 uereff_Gamma=None, uswitch_term=None):
+        self.f       = lines[0].frequency.f
+        self.Slines  = np.array([x.s for x in lines])
         self.lengths = np.array(line_lengths)
-        self.Sreflect = reflect.s
-        self.reflect_est = reflect_est
-        self.reflect_offset = reflect_offset
-        self.ereff_est = ereff_est
-        
+        self.ereff_est = ereff_est*(1 + 0j)
+        self.compensate_repeated_lines = compensate_repeated_lines
+        self.lnorm   = lnorm
+
+        # reflect(s): accept a single Network or a list; nan-filled if none given
+        if reflect is None:
+            self.Sreflect = np.ones((1, len(self.f), 2, 2))*np.nan
+        else:
+            reflect = reflect if isinstance(reflect, list) else [reflect]
+            self.Sreflect = np.array([x.s for x in reflect])
+        self.reflect_est    = np.atleast_1d(reflect_est)
+        self.reflect_offset = np.atleast_1d(reflect_offset)
+
         if switch_term is not None:
             self.switch_term = np.array([x.s.squeeze() for x in switch_term])
         else:
-            self.switch_term = np.array([self.f*0 for x in range(2)])
-        
-        # uncertainties
-        self.uSlines      = np.array(uSlines) if uSlines is not None else np.zeros(len(self.lengths))
-        if len(self.uSlines.shape) < 3:
-            # handle cases when user only give one variance/covariance for all measurements
-            if len(self.uSlines.shape) < 2:
-                if len(self.uSlines.shape) < 1:
-                    self.uSlines  = np.array([self.uSlines.squeeze() for l in self.lengths])
-            else:
-                self.uSlines  = np.array([self.uSlines.squeeze() for l in self.lengths])
-        
-        self.uereff_Gamma  = np.array(uereff_Gamma) if uereff_Gamma is not None else np.zeros(len(self.lengths))
-        if len(self.uereff_Gamma.shape) < 3:
-            # handle cases when user only give one variance/covariance for all measurements
-            if len(self.uereff_Gamma.shape) < 2:
-                if len(self.uereff_Gamma.shape) < 1:
-                    self.uereff_Gamma  = np.array([self.uereff_Gamma.squeeze() for l in self.lengths])
-            else:
-                self.uereff_Gamma  = np.array([self.uereff_Gamma.squeeze() for l in self.lengths])
-            
+            self.switch_term = np.zeros((2, len(self.f)), dtype=complex)
+
+        # uncertainties (per-standard specs are expanded to one entry per line/reflect)
+        self.uSlines      = per_standard(uSlines, len(self.lengths))
+        self.uereff_Gamma = per_standard(uereff_Gamma, len(self.lengths))
+        self.uSreflect    = per_standard(uSreflect, self.Sreflect.shape[0])
         self.ulengths     = ulengths if ulengths is not None else 0
-        self.uSreflect    = uSreflect if uSreflect is not None else 0
         self.ureflect     = ureflect if ureflect is not None else 0
         self.usw          = uswitch_term if uswitch_term is not None else 0
-        
-    
-    def run_mTRL(self):
-        # This runs the standard mTRL without uncertainties (very fast).
-        gammas  = []
-        lambds  = []
-        Xs      = []
-        ks      = []
-        ereff0  = self.ereff_est
-        gamma0  = 2*np.pi*self.f[0]/c0*np.sqrt(-ereff0)
-        gamma0  = gamma0*np.sign(gamma0.real) # use positive square root
-        reflect_est0 = self.reflect_est*np.exp(-2*gamma0*self.reflect_offset)
-        reflect_est = reflect_est0
-        
-        lengths = self.lengths
-        print('\nmTRL is running without uncertainties...')
-        for inx, f in enumerate(self.f):
-            Slines = self.Slines[:,inx,:,:]
-            Sreflect = self.Sreflect[inx,:,:]
-            sw = self.switch_term[:,inx]
-            
-            X,k,ereff0,gamma,reflect_est,lambd = mTRL_at_one_freq(Slines, lengths, Sreflect, 
-                                                    ereff_est=ereff0, reflect_est=reflect_est, f=f, sw=sw)
-            Xs.append(X)
-            ks.append(k)
-            gammas.append(gamma)
-            lambds.append(lambd)
-            print(f'Frequency: {f*1e-9:0.2f} GHz ... DONE!')
 
-        self.X = np.array(Xs)
-        self.k = np.array(ks)
-        self.gamma = np.array(gammas)
-        self.ereff = -(c0/2/np.pi/self.f*self.gamma)**2
-        self.lambd = np.array(lambds)
-        self.error_coef()
-        
-    def run_umTRL(self):
-        # This runs the mTRL with uncertainties 
-        # (quite slow because of METAS UncLib, but faster than a MC analysis ;) ).
-        
-        self.run_mTRL() # initial run to get nominal cal coefficients
-        gammas  = []
-        lambds  = []
-        Xs      = []
-        ks      = []
-        
-        # parameters of variables with uncertainties in metas formate for all freqs
-        Slines_metas   = []
-        lengths_metas  = []
-        Sreflect_metas = []
-        sw_metas       = []
-        reflect_ratio_metas = []
-        ereff_Gamma_metas   = []
-        
-        ereff0  = self.ereff[0]
-        gamma0  = 2*np.pi*self.f[0]/c0*np.sqrt(-ereff0)
-        reflect_est0 = self.reflect_est*np.exp(-2*gamma0*self.reflect_offset)
-        reflect_est = reflect_est0
-        # line lengths
-        lengths = self.lengths
-        
-        uSlines_full      = np.array([ convert2cov(x, len(self.f), 8) for x in self.uSlines ])
-        ulengths_full     = convert2cov(self.ulengths, len(self.f), len(lengths))
-        uSreflect_full    = convert2cov(self.uSreflect, len(self.f), 8)
-        ureflect_full     = convert2cov(self.ureflect, len(self.f), 2)
-        uereff_Gamma_full = np.array([ convert2cov(x, len(self.f), 4) for x in self.uereff_Gamma ])
-        usw_full          = convert2cov(self.usw, len(self.f), 4)
-        
-        print('\nmTRL is running with uncertainties...')
-        for inx, f in enumerate(self.f):
-            Slines = self.Slines[:,inx,:,:]
-            Sreflect = self.Sreflect[inx,:,:]
-            sw = self.switch_term[:,inx]
-            
-            # uncertainties
-            uSlines   = uSlines_full[:,inx,:,:]
-            ulengths  = ulengths_full[inx,:,:]
-            uSreflect = uSreflect_full[inx,:,:]
-            ureflect  = ureflect_full[inx,:,:]
-            uereff_Gamma = uereff_Gamma_full[:,inx,:,:]
-            usw   = usw_full[inx,:,:]
-            
-            X,k,ereff0,gamma, reflect_est, lambd, par_tuple = \
-                umTRL_at_one_freq(Slines, lengths, Sreflect, 
-                                  ereff_est=ereff0, reflect_est=reflect_est, f=f,
-                                  X=self.X[inx], k=self.k[inx], sw=sw,
-                                  uSlines=uSlines, ulengths=ulengths, 
-                                  uSreflect=uSreflect, ureflect=ureflect,
-                                  uereff_Gamma=uereff_Gamma, usw=usw
-                                  )
+    def run_mTRL(self):
+        # standard mTRL without uncertainties (fast, numpy only)
+        print('\nmTRL (no uncertainty) running...')
+        Xs, ks, gammas, lambds_S, kappas_S = ([] for _ in range(5))
+        gamma_est = 2*np.pi*self.f[0]/c0*np.sqrt(-self.ereff_est)
+        gamma_est = np.sign(gamma_est.imag)*gamma_est   # seed with positive imag (forward wave)
+        for i, f in enumerate(self.f):
+            X, k, gamma, gamma_est, _, lambd_S, kappa_S = mTRL_at_one_freq(
+                list(self.Slines[:, i]), self.lengths, list(self.Sreflect[:, i]),
+                gamma_est, self.reflect_est, self.reflect_offset, sw=self.switch_term[:, i],
+                compensate_repeated_lines=self.compensate_repeated_lines, lnorm=self.lnorm)
             Xs.append(X)
             ks.append(k)
             gammas.append(gamma)
-            lambds.append(lambd)
-            
-            Slines_metas.append(par_tuple[0])
-            lengths_metas.append(par_tuple[1])
-            Sreflect_metas.append(par_tuple[2])
-            reflect_ratio_metas.append(par_tuple[3])
-            ereff_Gamma_metas.append(par_tuple[4])
-            sw_metas.append(par_tuple[5])
-            print(f'Frequency: {f*1e-9:0.2f} GHz ... DONE!')
-        
-        self.Slines_metas   = np.array(Slines_metas)
-        self.lengths_metas  = np.array(lengths_metas)
-        self.Sreflect_metas = np.array(Sreflect_metas)
-        self.reflect_ratio_metas = np.array(reflect_ratio_metas)
-        self.ereff_Gamma_metas   = np.array(ereff_Gamma_metas)
-        self.sw_metas   = np.array(sw_metas)
-        
+            lambds_S.append(lambd_S)
+            kappas_S.append(kappa_S)
+            if i + 1 < len(self.f):
+                gamma_est = gamma_est/f*self.f[i+1]   # scale gamma to the next point (gamma ~ f)
+            print(f'Frequency: {f*1e-9:.2f} GHz done!', end='\r', flush=True)
+        self._store(Xs, ks, gammas, lambds_S, kappas_S)
+
+    def run_umTRL(self):
+        # mTRL with linear uncertainty propagation (uses METAS UncLib; slower)
+        self.run_mTRL()   # nominal coefficients, needed for the line-mismatch covariance
+        X_nom, k_nom = self.X, self.k
+        print('\nmTRL (with uncertainty) running...')
+
+        # per-frequency covariance matrices
+        nf = len(self.f)
+        uSlines      = [convert2cov(u, nf, 8) for u in self.uSlines]
+        uereff_Gamma = [convert2cov(u, nf, 4) for u in self.uereff_Gamma]
+        uSreflect    = [convert2cov(u, nf, 8) for u in self.uSreflect]
+        ulengths     = convert2cov(self.ulengths, nf, len(self.lengths))
+        ureflect     = convert2cov(self.ureflect, nf, 2)
+        usw          = convert2cov(self.usw, nf, 4)
+
+        Xs, ks, gammas, lambds_S, kappas_S = ([] for _ in range(5))
+        Slines_m, lengths_m, Sreflect_m, reflect_ratio_m, ereff_Gamma_m, sw_m = ([] for _ in range(6))
+        gamma_est = 2*np.pi*self.f[0]/c0*np.sqrt(-self.ereff_est)
+        gamma_est = np.sign(gamma_est.imag)*gamma_est   # seed with positive imag (forward wave)
+        for i, f in enumerate(self.f):
+            X, k, gamma, gamma_est, _, lambd_S, kappa_S, par = umTRL_at_one_freq(
+                list(self.Slines[:, i]), self.lengths, list(self.Sreflect[:, i]),
+                gamma_est, self.reflect_est, self.reflect_offset, f, X_nom[i], k_nom[i],
+                sw=self.switch_term[:, i],
+                compensate_repeated_lines=self.compensate_repeated_lines, lnorm=self.lnorm,
+                uSlines=[u[i] for u in uSlines], ulengths=ulengths[i],
+                uSreflect=[u[i] for u in uSreflect], ureflect=ureflect[i],
+                uereff_Gamma=[u[i] for u in uereff_Gamma], usw=usw[i])
+            Xs.append(X)
+            ks.append(k)
+            gammas.append(gamma)
+            lambds_S.append(lambd_S)
+            kappas_S.append(kappa_S)
+            Slines_m.append(par[0])
+            lengths_m.append(par[1])
+            Sreflect_m.append(par[2])
+            reflect_ratio_m.append(par[3])
+            ereff_Gamma_m.append(par[4])
+            sw_m.append(par[5])
+            if i + 1 < len(self.f):
+                gamma_est = gamma_est/f*self.f[i+1]   # scale gamma to the next point (gamma ~ f)
+            print(f'Frequency: {f*1e-9:.2f} GHz done!', end='\r', flush=True)
+
+        self.Slines_metas        = np.array(Slines_m)
+        self.lengths_metas       = np.array(lengths_m)
+        self.Sreflect_metas      = np.array(Sreflect_m)
+        self.reflect_ratio_metas = np.array(reflect_ratio_m)
+        self.ereff_Gamma_metas   = np.array(ereff_Gamma_m)
+        self.sw_metas            = np.array(sw_m)
+        self._store(Xs, ks, gammas, lambds_S, kappas_S)
+
+    def _store(self, Xs, ks, gammas, lambds_S, kappas_S):
         self.X = np.array(Xs)
         self.k = np.array(ks)
         self.gamma = np.array(gammas)
         self.ereff = -(c0/2/np.pi/self.f*self.gamma)**2
-        self.lambd = np.array(lambds)
+        self.lambd_S = np.array(lambds_S)   # same, after the S1/S2 scaling of W
+        self.kappa_S = np.array(kappas_S)
         self.error_coef()
 
     def error_coef(self):
         '''
-        Return the conventional 12 error terms from the error-box model. The conversion equations are adapted from [4]. Also [5] is a good reference for the equations.
-        Originally, I only included the 3 error terms from each port. However, thanks to @Zwelckovich feedback, I decided to update this function to return all 12 error terms. 
-        I also included the switch terms for sake of completeness, as well as the consistency test between 8-terms and 12-terms models, as discussed in [4].  
-
-        [4] R. B. Marks, "Formulations of the Basic Vector Network Analyzer Error Model including Switch-Terms," 50th ARFTG Conference Digest, 1997, pp. 115-126.
-        [5] Dunsmore, J.P.. Handbook of Microwave Component Measurements: with Advanced VNA Techniques.. Wiley, 2020.
-
-        Below are the error term abbreviations in full. In Marks's paper [4] he just used the abbreviations as is, which can be 
-        difficult to understand if you are not familiar with VNA calibration terminology. For those interested in VNAs in general, 
-        I recommend the book by Dunsmore [5], where he lists the terms in full.
-        
-        Left port error terms (forward direction):
-        EDF: forward directivity
-        ESF: forward source match
-        ERF: forward reflection tracking
-        ELF: forward load match
-        ETF: forward transmission tracking
-        EXF: forward crosstalk
-        
-        Right port error terms (reverse direction):
-        EDR: reverse directivity
-        ESR: reverse source match
-        ERR: reverse reflection tracking
-        ELR: reverse load match
-        ETR: reverse transmission tracking
-        EXR: reverse crosstalk
-        
-        Switch terms:
-        GF: forward switch term
-        GR: reverse switch term
-
-        NOTE: the k in my notation is equivalent to Marks' notation [4] by this relationship: k = (beta/alpha)*(1/ERR).
+        Return the conventional 12 error terms of the error-box model, plus the switch terms
+        and the 8-vs-12-term consistency check. Notation follows Marks ("Formulations of the
+        Basic VNA Error Model including Switch-Terms", 50th ARFTG, 1997); see also Dunsmore
+        ("Handbook of Microwave Component Measurements", Wiley, 2020). Here k = (beta/alpha)/ERR.
         '''
+        c = {}
+        c['EDF'] =  self.X[:,2,3]
+        c['ESF'] = -self.X[:,3,2]
+        c['ERF'] =  self.X[:,2,2] - self.X[:,2,3]*self.X[:,3,2]
+        c['EDR'] = -self.X[:,1,3]
+        c['ESR'] =  self.X[:,3,1]
+        c['ERR'] =  self.X[:,1,1] - self.X[:,3,1]*self.X[:,1,3]
+        c['GF']  = self.switch_term[0]
+        c['GR']  = self.switch_term[1]
+        c['ELF'] = c['ESR'] + c['ERR']*c['GF']/(1 - c['EDR']*c['GF'])
+        c['ETF'] = 1/self.k/(1 - c['EDR']*c['GF'])
+        c['EXF'] = 0*c['ESR']
+        c['ELR'] = c['ESF'] + c['ERF']*c['GR']/(1 - c['EDF']*c['GR'])
+        c['ETR'] = self.k*c['ERR']*c['ERF']/(1 - c['EDF']*c['GR'])
+        c['EXR'] = 0*c['ESR']
+        # 8-vs-12-term consistency (eq. (35) in Marks); should be ~0
+        c['check'] = abs(c['ETF']*c['ETR'] - (c['ERR'] + c['EDR']*(c['ELF']-c['ESR']))
+                                             *(c['ERF'] + c['EDF']*(c['ELR']-c['ESF'])))
+        self.coefs = c
+        return c
 
-        self.coefs = {}
-        # forward 3 error terms. These equations are directly mapped from eq. (3) in [4]
-        EDF =  self.X[:,2,3]
-        ESF = -self.X[:,3,2]
-        ERF =  self.X[:,2,2] - self.X[:,2,3]*self.X[:,3,2]
-        
-        # reverse 3 error terms. These equations are directly mapped from eq. (3) in [4]
-        EDR = -self.X[:,1,3]
-        ESR =  self.X[:,3,1]
-        ERR =  self.X[:,1,1] - self.X[:,3,1]*self.X[:,1,3]
-        
-        # switch terms
-        GF = self.switch_term[0]
-        GR = self.switch_term[1]
-
-        # remaining forward terms
-        ELF = ESR + ERR*GF/(1-EDR*GF)  # eq. (36) in [4].
-        ETF = 1/self.k/(1-EDR*GF)      # eq. (38) in [4], after substituting eq. (36) in eq. (38) and simplifying.
-        EXF = 0*ESR  # setting it to zero, since we assumed no cross-talk in the calibration. (update if known!)
-
-        # remaining reverse terms
-        ELR = ESF + ERF*GR/(1-EDF*GR)    # eq. (37) in [4].
-        ETR = self.k*ERR*ERF/(1-EDF*GR)  # eq. (39) in [4], after substituting eq. (37) in eq. (39) and simplifying.
-        EXR = 0*ESR  # setting it to zero, since we assumed no cross-talk in the calibration. (update if known!)
-
-        # forward direction
-        self.coefs['EDF'] = EDF
-        self.coefs['ESF'] = ESF
-        self.coefs['ERF'] = ERF
-        self.coefs['ELF'] = ELF
-        self.coefs['ETF'] = ETF
-        self.coefs['EXF'] = EXF
-        self.coefs['GF']  = GF
-
-        # reverse direction
-        self.coefs['EDR'] = EDR
-        self.coefs['ESR'] = ESR
-        self.coefs['ERR'] = ERR
-        self.coefs['ELR'] = ELR
-        self.coefs['ETR'] = ETR
-        self.coefs['EXR'] = EXR
-        self.coefs['GR']  = GR
-
-        # consistency check between 8-terms and 12-terms model. Based on eq. (35) in [4].
-        # This should equal zero, otherwise there is inconsistency between the models (can arise from switch term measurements).
-        self.coefs['check'] = abs( ETF*ETR - (ERR + EDR*(ELF-ESR))*(ERF + EDF*(ELR-ESF)) )
-        
-        return self.coefs
-    
-    
     def apply_cal(self, NW, cov=None, left=True):
-        # apply calibration to a 1-port or 2-port network.
-        # NW:   the network to be calibrated (1- or 2-port).
-        # left: boolean: define which port to use when 1-port network is given.
-        # If left is True, left port is used; otherwise right port is used.
-        # The outputs are the corrected NW and its cov matrix (at every freq.)
-        
-        nports = np.sqrt(len(NW.port_tuples)).astype('int') # number of ports
-        # if 1-port, convert to 2-port (later convert back to 1-port)
+        # apply the calibration to a 1- or 2-port network.
+        # cov: optional per-frequency covariance of NW.s (enables uncertainty on the DUT).
+        # left: which port to keep when NW is 1-port. Returns (skrf Network, S-parameters).
+        nports = int(np.sqrt(len(NW.port_tuples)))
         if nports < 2:
             NW = rf.two_port_reflect(NW)
-        
-        metas = True if isinstance(self.k[0], type(munc.ucomplex(0))) else False
-        cov   = np.nan*self.f if cov is None else cov
-        metas = True if cov is not None else metas  # override if cov is given
 
-        # numpy or metas functions
-        dot, inv, eig, solve, \
-            conj, exp, log, acosh, sqrt, real, imag, \
-                get_value, ucomplex = metas_or_numpy_funcs(metas=metas)
-        
-        # apply cal
+        metas = isinstance(self.k[0], type(munc.ucomplex(0))) or (cov is not None)
+        dot, inv, eig, conj, exp, log, sqrt, get_value, ucomplex = metas_or_numpy_funcs(metas)
+        covs = [None]*len(self.f) if cov is None else cov
+
         S_cal = []
-        for x,k,s,sw,c in zip(self.X, self.k, NW.s, self.switch_term.T, cov):
-            s = s if np.all(np.isnan(c)) else munc.ucomplexarray(s, covariance=c)
+        for X, k, s, sw, c in zip(self.X, self.k, NW.s, self.switch_term.T, covs):
+            if c is not None:
+                s = munc.ucomplexarray(s, covariance=c)
             s = correct_switch_term(s, sw[0], sw[1]) if np.any(sw) else s
-            xinv = inv(x)
-            s11,s21,s12,s22 = s[0,0],s[1,0],s[0,1],s[1,1]
-            M_ = np.array([-s11*s22+s12*s21, -s22, s11, 1])
-            T_ = dot(xinv, M_)
-            s21_cal = k*s21/T_[-1]
-            T_ = T_/T_[-1]
-            scal = np.array([[T_[2], (T_[0]-T_[2]*T_[1])/s21_cal],[s21_cal, -T_[1]]])
-            S_cal.append(scal)
-            
-        S_cal = np.array(S_cal).squeeze()
-        
-        # revert to 1-port device if the input was a 1-port device
-        if nports < 2:
-            if left: # left port
-                S_cal = S_cal[:,0,0]
-            else:  # right port
-                S_cal = S_cal[:,1,1]
-        
-        return rf.Network(frequency=NW.frequency, s=get_value(S_cal).squeeze()), S_cal
-        
-    
-    def shift_plane(self, d=0):
-        # shift calibration plane by distance d
-        # negative: shift toward port
-        # positive: shift away from port
-        # e.g., if your Thru has a length of L, 
-        # then d=-L/2 to shift the plane backward 
-        metas = True if isinstance(self.k[0], type(munc.ucomplex(0))) else False
-        # numpy or metas functions
-        dot, inv, eig, solve, \
-            conj, exp, log, acosh, sqrt, real, imag, \
-                get_value, ucomplex = metas_or_numpy_funcs(metas=metas)
-        X_new = []
-        K_new = []
-        for x,k,g in zip(self.X, self.k, self.gamma):
-            z = exp(-g*d)
-            KX_new = k*x.dot(np.diag([z**2, 1, 1, 1/z**2]))
-            X_new.append(KX_new/KX_new[-1,-1])
-            K_new.append(KX_new[-1,-1])
-            
-        self.X = np.array(X_new)
-        self.k = np.array(K_new)
-    
-    def renorm_impedance(self, Z_new, Z0=50):
-        # re-normalize reference calibration impedance
-        # by default, the ref impedance is the characteristic 
-        # impedance of the line standards.
-        # Z_new: new ref. impedance (can be array if frequency dependent)
-        # Z0: old ref. impedance (can be array if frequency dependent)
-        metas = True if isinstance(self.k[0], type(munc.ucomplex(0))) else False
-        # numpy or metas functions
-        dot, inv, eig, solve, \
-            conj, exp, log, acosh, sqrt, real, imag, \
-                get_value, ucomplex = metas_or_numpy_funcs(metas=metas)
-        
-        # ensure correct array dimensions (if not, you get an error!)
-        N = len(self.k)
-        Z_new = Z_new*np.ones(N)
-        Z0    = Z0*np.ones(N)
-        
-        G = (Z_new-Z0)/(Z_new+Z0)
-        X_new = []
-        K_new = []
-        for x,k,g in zip(self.X, self.k, G):
-            KX_new = k*x.dot( np.kron([[1, -g],[-g, 1]],[[1, g],[g, 1]])/(1-g**2) )
-            X_new.append(KX_new/KX_new[-1,-1])
-            K_new.append(KX_new[-1,-1])
+            A = np.array([[X[2,2], X[2,3]], [X[3,2], 1]])
+            B = np.array([[X[1,1], X[3,1]], [X[1,3], 1]])
+            S_cal.append(LFTinv(error_matrix(k*A, B, inv), s, dot, inv))
 
-        self.X = np.array(X_new)
-        self.k = np.array(K_new)
+        S_cal = np.array(S_cal)
+        if nports < 2:
+            S_cal = S_cal[:, 0, 0] if left else S_cal[:, 1, 1]
+        return rf.Network(frequency=NW.frequency, s=get_value(S_cal).squeeze()), S_cal.squeeze()
+
+    def reciprocal_ntwk(self):
+        # split the calibration into the left and right error-boxes as skrf Networks,
+        # assuming they are reciprocal (S21 = S12). Nominal values only (skrf holds no metas).
+        val = munc.get_value if isinstance(self.k[0], type(munc.ucomplex(0))) else (lambda x: x)
+        freq = rf.Frequency.from_f(self.f, unit='hz')
+        freq.unit = 'ghz'
+
+        def box(ED, ES, ER):
+            s11, s22 = val(self.coefs[ED]), val(self.coefs[ES])
+            s21 = sqrt_unwrapped(val(self.coefs[ER]))   # S21 = S12 by reciprocity
+            return np.array([[[a, c], [c, b]] for a, b, c in zip(s11, s22, s21)])
+
+        left  = rf.Network(s=box('EDF', 'ESF', 'ERF'), frequency=freq, name='Left error-box')
+        right = rf.Network(s=box('EDR', 'ESR', 'ERR'), frequency=freq, name='Right error-box')
+        right.flip()   # so it de-embeds from port-2's perspective
+        return left, right
+
+    def shift_plane(self, da=0, db=None):
+        # shift the calibration plane by da from port-1 and db from port-2 (db defaults to da).
+        # negative shifts toward the port, positive away from it.
+        db = da if db is None else db
+        metas = isinstance(self.k[0], type(munc.ucomplex(0)))
+        dot, inv, eig, conj, exp, log, sqrt, get_value, ucomplex = metas_or_numpy_funcs(metas)
+        Xs, ks = [], []
+        for X, k, g in zip(self.X, self.k, self.gamma):
+            KX = k*dot(X, np.diag([exp(-g*(db+da)), exp(-g*(db-da)), exp(g*(db-da)), exp(g*(db+da))]))
+            Xs.append(KX/KX[-1,-1]); ks.append(KX[-1,-1])
+        self.X, self.k = np.array(Xs), np.array(ks)
+        self.error_coef()
+
+    def renorm_impedance(self, Z_new, Z0=50):
+        # re-normalize the reference impedance (default: line characteristic impedance).
+        # Z_new, Z0 may be scalars or frequency-dependent arrays.
+        metas = isinstance(self.k[0], type(munc.ucomplex(0)))
+        dot, inv, eig, conj, exp, log, sqrt, get_value, ucomplex = metas_or_numpy_funcs(metas)
+        Z_new, Z0 = Z_new*np.ones(len(self.k)), Z0*np.ones(len(self.k))
+        G = (Z_new - Z0)/(Z_new + Z0)
+        Xs, ks = [], []
+        for X, k, g in zip(self.X, self.k, G):
+            KX = k*dot(X, np.kron([[1, -g], [-g, 1]], [[1, g], [g, 1]])/(1 - g**2))
+            Xs.append(KX/KX[-1,-1]); ks.append(KX[-1,-1])
+        self.X, self.k = np.array(Xs), np.array(ks)
+        self.error_coef()
 
 # EOF

@@ -2,8 +2,6 @@
 
 Multiline thru-reflect-line (TRL) calibration with linear uncertainty propagation.
 
-## About
-
 This extends my original mTRL algorithm [1] with linear uncertainty support. Derivatives (Jacobians) are computed via automatic differentiation (AD) using the METAS UncLib package [2]. All uncertainties are expressed as frequency-dependent covariance matrices. The following uncertainty sources can be propagated:
 
 * S-parameter measurement noise
@@ -17,6 +15,12 @@ Compared to [1], the implementation is simplified to facilitate uncertainty prop
 
 ![mTRL_flow_diagram](images/mTRL_flow_diagram.png)
 *mTRL calibration forward flow diagram.*
+
+Other repositories related to multiline TRL calibration:
+- <https://github.com/ZiadHatab/multiline-trl-calibration>
+- <https://github.com/ZiadHatab/line-length-multiline-trl-calibration>
+- <https://github.com/ZiadHatab/thru-free-multiline-calibration>
+- <https://github.com/ZiadHatab/verification-multiline-trl-calibration>
 
 ## Requirements
 
@@ -153,7 +157,6 @@ Frequency-varying covariance must be defined explicitly as a 3D array (the first
 
 This project is ongoing. Planned updates include:
 
-* Support for multiple reflect standards.
 * Probing and repeatability uncertainties.
 * Rewrite to remove the METAS UncLib dependency to more license friendly package (e.g., [GTC](https://github.com/MSLNZ/GTC), [AutoUncertainties](https://github.com/varchasgopalaswamy/AutoUncertainties), [uncertainties](https://github.com/lmfit/uncertainties), ..., etc).
 
@@ -193,7 +196,7 @@ This example also includes a breakdown of the uncertainty budget based on the ty
 
 ## Crediting
 
-If you found this useful and used it in a publication, please cite [1] and[4]. If you use the measurements, please also cite [5].
+If you found this useful and used it in a publication, please cite [1] and [4]. If you use the measurements, please also cite [5].
 
 ## References
 
@@ -201,7 +204,7 @@ If you found this useful and used it in a publication, please cite [1] and[4]. I
 
 [2] M. Zeier, J. Hoffmann, and M. Wollensack, “Metas.unclib–a measurement uncertainty calculator for advanced problems,” Metrologia, vol. 49, no. 6, pp. 809–815, nov 2012, doi: [10.1088/0026-1394/49/6/809](http://dx.doi.org/10.1088/0026-1394/49/6/809). METAS website: [https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html](https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html)
 
-[3] Z. Hatab, M. Gadringer, and W. Bösch, "Propagation of Measurement and Model Uncertainties through Multiline TRL Calibration," 2022 Conference on Precision Electromagnetic Measurements (CPEM), Wellington, New Zealand, 2022, pp. 1-2, , doi: *I will update when available*. e-print: [https://arxiv.org/abs/2206.10209](https://arxiv.org/abs/2206.10209)
+[3] Z. Hatab, M. Gadringer, and W. Bösch, "Propagation of Measurement and Model Uncertainties through Multiline TRL Calibration," 2022 Conference on Precision Electromagnetic Measurements (CPEM), Wellington, New Zealand, 2022, pp. 1-2, e-print: [https://arxiv.org/abs/2206.10209](https://arxiv.org/abs/2206.10209)
 
 [4] Z. Hatab, M. E. Gadringer, and W. Bösch, "Propagation of Linear Uncertainties through Multiline Thru-Reflect-Line Calibration," in _IEEE Transactions on Instrumentation and Measurement_, vol. 72, pp. 1-9, 2023, doi: [10.1109/TIM.2023.3296123](http://dx.doi.org/10.1109/TIM.2023.3296123).
 
@@ -209,4 +212,4 @@ If you found this useful and used it in a publication, please cite [1] and[4]. I
 
 ## License
 
-The code is licensed under the BSD-3-Clause license. Note that the METAS UncLib package, which is required to run the uncertainty features, has its own separate license: [https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html](https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html)
+The code here is licensed under the BSD-3-Clause license. Note that the METAS UncLib package, which is required to run the uncertainty features, has its own separate license: [https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html](https://www.metas.ch/metas/en/home/fabe/hochfrequenz/unclib.html)
